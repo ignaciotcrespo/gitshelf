@@ -1,0 +1,49 @@
+version: 2
+
+builds:
+  - main: ./cmd/gitshelf
+    binary: gitshelf
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - formats: ['tar.gz']
+    format_overrides:
+      - goos: windows
+        formats: ['zip']
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+
+brews:
+  - repository:
+      owner: ignaciotcrespo
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: https://github.com/ignaciotcrespo/gitshelf
+    description: Git changelists and shelves TUI, inspired by IntelliJ IDEA
+    license: MIT
+    skip_upload: auto
+    install: |
+      bin.install "gitshelf"
+    test: |
+      assert_match version.to_s, shell_output("#{bin}/gitshelf --version")
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^ci:'
