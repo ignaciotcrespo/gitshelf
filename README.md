@@ -1,4 +1,5 @@
-# gitshelf
+
+![gitshelf-logo1.svg](docs/gitshelf-logo1.svg)
 
 A terminal UI for organizing git changes into changelists and shelves — like IntelliJ IDEA's changelist system, but for any repo and any editor.
 
