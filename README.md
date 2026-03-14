@@ -1,5 +1,8 @@
-
-![gitshelf-logo1.svg](docs/gitshelf-logo1.svg)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/gitshelf-logo-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="docs/img/gitshelf-logo-light.svg">
+  <img src="docs/img/gitshelf-logo-light.svg" alt="gitshelf" height="160">
+</picture>
 
 A terminal UI for organizing git changes into changelists and shelves — like IntelliJ IDEA's changelist system, but for any repo and any editor.
 
