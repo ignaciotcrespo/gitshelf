@@ -81,12 +81,11 @@ func TestKeyBindings_CLKeys(t *testing.T) {
 		}
 
 		r := HandleKey(b.Key, s, ctx)
-		// The key should produce some effect: prompt, status, setActive, copyPatch, quit, or state change
+		// The key should produce some effect: prompt, status, copyPatch, quit, or state change
 		hasEffect := r.StartPrompt != nil ||
 			r.RunRemote != nil ||
 			r.StatusMsg != "" ||
 			r.ErrorMsg != "" ||
-			r.SetActive != "" ||
 			r.CopyPatch.Source != CopyPatchNone ||
 			r.Quit ||
 			r.Refresh != RefreshNone

@@ -413,9 +413,6 @@ func (app *TestApp) buildKeyContext() controller.KeyContext {
 		ctx.ShelfNames[i] = s.Meta.Name
 		ctx.ShelfDirs[i] = s.PatchDir
 	}
-	if app.clState != nil {
-		ctx.ActiveCL = app.clState.Active
-	}
 	return ctx
 }
 
@@ -459,12 +456,6 @@ func (app *TestApp) PressKey(key string) {
 	kr := controller.HandleKey(key, app.state, keyCtx)
 	app.state = kr.State
 
-	if kr.SetActive != "" {
-		app.clState.Active = kr.SetActive
-		if err := app.stores.CL.Save(app.clState); err != nil {
-			app.t.Fatalf("save CL: %v", err)
-		}
-	}
 	if kr.RunRemote != nil {
 		result := &prompt.Result{Mode: kr.RunRemote.Mode, Value: kr.RunRemote.Remote}
 		action.Execute(result, &app.stores, app.logger, nil)
@@ -1365,30 +1356,7 @@ func TestSelectDeselectFiles_GitSafe(t *testing.T) {
 	app.assertGitUnchanged(snap)
 }
 
-// 18. TestSetActiveCL_GitSafe
-func TestSetActiveCL_GitSafe(t *testing.T) {
-	app := newTestApp(t)
-	setupModifiedFiles(t, app)
-
-	app.state.Focus = types.PanelChangelists
-	app.PressKey("n")
-	app.TypePrompt("ActiveTest")
-	app.refresh()
-
-	// Navigate to it
-	for i, name := range app.clNames {
-		if name == "ActiveTest" {
-			app.state.CLSelected = i
-			break
-		}
-	}
-
-	snap := app.gitSnapshot()
-	app.PressKey("a")
-	app.assertGitUnchanged(snap)
-}
-
-// 19. TestNavigationKeys_GitSafe
+// 18. TestNavigationKeys_GitSafe
 func TestNavigationKeys_GitSafe(t *testing.T) {
 	app := newTestApp(t)
 	setupModifiedFiles(t, app)
@@ -2298,12 +2266,12 @@ func TestWorktreePanel_GitSafe(t *testing.T) {
 
 	snap := app.gitSnapshot()
 
-	// Default: hidden (single worktree)
-	if app.state.WorktreeState != types.PanelHidden {
-		t.Errorf("expected WorktreeState=Hidden, got %d", app.state.WorktreeState)
+	// Default: minimized (single worktree)
+	if app.state.WorktreeState != types.PanelMinimized {
+		t.Errorf("expected WorktreeState=Minimized, got %d", app.state.WorktreeState)
 	}
 
-	// Press 6 to show
+	// Press 6 to show (not focused → expands to normal + focuses)
 	app.PressKey("6")
 	if app.state.WorktreeState != types.PanelNormal {
 		t.Errorf("expected WorktreeState=Normal, got %d", app.state.WorktreeState)
@@ -2321,11 +2289,10 @@ func TestWorktreePanel_GitSafe(t *testing.T) {
 		t.Errorf("expected focus on pivot, got %d", app.state.Focus)
 	}
 
-	// Focus worktrees again and press 6 → hidden
-	app.state.Focus = types.PanelWorktrees
+	// Press 6 again (not focused) → normal again
 	app.PressKey("6")
-	if app.state.WorktreeState != types.PanelHidden {
-		t.Errorf("expected WorktreeState=Hidden, got %d", app.state.WorktreeState)
+	if app.state.WorktreeState != types.PanelNormal {
+		t.Errorf("expected WorktreeState=Normal, got %d", app.state.WorktreeState)
 	}
 
 	app.assertGitUnchanged(snap)

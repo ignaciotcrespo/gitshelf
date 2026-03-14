@@ -51,11 +51,6 @@ func (m Model) renderChangelistContent(maxLines int) panelContent {
 			}
 		}
 
-		activeStr := ""
-		if m.clState != nil && name == m.clState.Active {
-			activeStr = activeMarkerStyle.Render(" ●")
-		}
-
 		fileCount := 0
 		for _, cl := range m.clState.Changelists {
 			if cl.Name == name {
@@ -76,7 +71,7 @@ func (m Model) renderChangelistContent(maxLines int) panelContent {
 		if fileCount > 0 {
 			info = activeMarkerStyle.Render(infoStr)
 		}
-		b.WriteString(cursor + dirtyMark + nameStr + activeStr + info + "\n")
+		b.WriteString(cursor + dirtyMark + nameStr + info + "\n")
 	}
 	return panelContent{
 		content: b.String(),
@@ -387,10 +382,6 @@ func (m Model) renderHelp() string {
 	if m.state.LogState == types.PanelHidden {
 		hidden += " · 5 show log"
 	}
-	if m.state.WorktreeState == types.PanelHidden {
-		hidden += " · 6 show worktrees"
-	}
-
 	switch m.state.Focus {
 	case types.PanelChangelists:
 		isDirty := len(m.clNames) > 0 && m.state.CLSelected < len(m.clNames) && m.dirtyCLs[m.clNames[m.state.CLSelected]]

@@ -29,7 +29,7 @@ type Changelist struct {
 
 // State holds all changelist data.
 type State struct {
-	Active      string       `json:"active"`
+	Active      string       `json:"active,omitempty"` // deprecated: kept for backward compat
 	Changelists []Changelist `json:"changelists"`
 }
 
@@ -141,7 +141,7 @@ func AutoAssignNewFiles(state *State) error {
 
 	for _, f := range tracked {
 		if !assigned[f] {
-			AssignFile(state, f, state.Active)
+			AssignFile(state, f, DefaultName)
 		}
 	}
 
@@ -204,9 +204,6 @@ func RemoveChangelist(state *State, name string) {
 	for i, cl := range state.Changelists {
 		if cl.Name == name {
 			state.Changelists = append(state.Changelists[:i], state.Changelists[i+1:]...)
-			if state.Active == name {
-				state.Active = DefaultName
-			}
 			return
 		}
 	}
@@ -217,9 +214,6 @@ func RenameChangelist(state *State, oldName, newName string) {
 	for i := range state.Changelists {
 		if state.Changelists[i].Name == oldName {
 			state.Changelists[i].Name = newName
-			if state.Active == oldName {
-				state.Active = newName
-			}
 			return
 		}
 	}

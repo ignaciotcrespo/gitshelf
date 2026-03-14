@@ -157,11 +157,11 @@ func Box(num int, title, content string, width, height int, active bool, opts ..
 	return strings.Join(renderedLines, "\n")
 }
 
-// CycleWorktreeState cycles the worktrees panel through: normal → minimized → hidden → normal.
-// Returns the new state and whether focus should move away (when hidden).
+// CycleWorktreeState toggles the worktrees panel between normal and minimized.
+// Returns the new state and whether focus should move away (when minimizing).
 func CycleWorktreeState(current PanelState, focused bool) (PanelState, bool) {
 	if !focused {
-		if current == PanelHidden {
+		if current == PanelMinimized || current == PanelHidden {
 			return PanelNormal, false
 		}
 		return current, false
@@ -169,9 +169,7 @@ func CycleWorktreeState(current PanelState, focused bool) (PanelState, bool) {
 	switch current {
 	case PanelNormal:
 		return PanelMinimized, true
-	case PanelMinimized:
-		return PanelHidden, true
-	case PanelHidden:
+	case PanelMinimized, PanelHidden:
 		return PanelNormal, false
 	}
 	return current, false

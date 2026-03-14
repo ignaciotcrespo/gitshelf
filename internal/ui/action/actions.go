@@ -267,7 +267,6 @@ func executeUnshelve(r *prompt.Result, stores *Stores, log Logger, ctx *ActionCo
 	// Assign unshelved files directly to the target changelist
 	targetCL := r.Value
 	changelist.AddChangelist(stores.State, targetCL)
-	stores.State.Active = targetCL
 
 	// Read shelf metadata to get file list and pre-assign them
 	var meta *shelf.Metadata

@@ -225,12 +225,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if kr.ErrorMsg != "" {
 			m.SetError(kr.ErrorMsg)
 		}
-		if kr.SetActive != "" {
-			m.clState.Active = kr.SetActive
-			if err := m.stores.CL.Save(m.clState); err != nil {
-				m.SetError(fmt.Sprintf("Save error: %v", err))
-			}
-		}
 		if kr.OpenURL != "" {
 			openURL(kr.OpenURL)
 			return m, nil
@@ -305,9 +299,6 @@ func (m *Model) buildKeyContext() controller.KeyContext {
 	for i, s := range m.shelves {
 		ctx.ShelfNames[i] = s.Meta.Name
 		ctx.ShelfDirs[i] = s.PatchDir
-	}
-	if m.clState != nil {
-		ctx.ActiveCL = m.clState.Active
 	}
 	ctx.DirtyFiles = m.dirtyFiles
 	ctx.DirtyCLs = m.dirtyCLs

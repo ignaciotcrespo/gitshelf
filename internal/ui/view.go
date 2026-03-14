@@ -84,18 +84,12 @@ func (m Model) View() string {
 		clH = leftInner / 3
 		shH = leftInner / 3
 		wtH = leftInner - clH - shH
-	case types.PanelMinimized:
+	default: // Minimized
 		// 2 panels × 2 border lines = 4, plus 1 minimized bar line
 		leftInner := contentH - 3 // contentH+2 total - 4 borders - 1 min bar
 		clH = leftInner / 2
 		shH = leftInner - clH
 		wtH = 1
-	default: // Hidden
-		// 2 panels × 2 border lines = 4
-		leftInner := contentH - 2 // contentH+2 total - 4 borders
-		clH = leftInner / 2
-		shH = leftInner - clH
-		wtH = 0
 	}
 
 	// Changelists panel: in-context accent when CL context, gray when shelf context
@@ -125,12 +119,10 @@ func (m Model) View() string {
 		wtPC := m.renderWorktreesContent(wtH)
 		wtBox := panel.Box(6, "Worktrees", wtPC.content, leftW, wtH, wtFocused, panel.BoxOpts{Scroll: wtPC.scroll})
 		leftColumn = lipgloss.JoinVertical(lipgloss.Left, clBox, shBox, wtBox)
-	case types.PanelMinimized:
+	default: // Minimized
 		currentWT := git.WorktreeName()
 		minBar := m.renderMinimizedWorktreeBar(leftW+2, currentWT)
 		leftColumn = lipgloss.JoinVertical(lipgloss.Left, clBox, shBox, minBar)
-	default:
-		leftColumn = lipgloss.JoinVertical(lipgloss.Left, clBox, shBox)
 	}
 
 	// Files panel — always in context

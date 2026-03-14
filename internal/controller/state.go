@@ -51,7 +51,7 @@ func NewState() State {
 		SelectedFiles: make(map[string]bool),
 		DiffState:     types.PanelNormal,
 		LogState:      types.PanelNormal,
-		WorktreeState: types.PanelHidden,
+		WorktreeState: types.PanelMinimized,
 	}
 }
 
@@ -77,7 +77,6 @@ type KeyContext struct {
 	ShelfDirs       []string // PatchDir paths for each shelf
 	ShelfFileCount  int
 	SelectedCount   int
-	ActiveCL        string
 	UnversionedName string
 	DefaultName     string
 	LastCommitMsg   string
@@ -97,7 +96,6 @@ type KeyResult struct {
 	Refresh     RefreshFlag
 	StartPrompt *PromptReq
 	RunRemote   *RemoteReq // immediate push/pull (no prompt needed)
-	SetActive   string     // changelist to mark active (empty = no change)
 	CopyPatch   CopyPatchReq // request to copy a patch to clipboard
 	OpenURL     string     // URL to open in browser
 	StatusMsg   string

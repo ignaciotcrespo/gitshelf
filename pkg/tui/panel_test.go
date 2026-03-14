@@ -115,10 +115,10 @@ func TestCycleWorktreeState(t *testing.T) {
 		wantMoveFoc bool
 	}{
 		{"normal_focused_to_minimized", PanelNormal, true, PanelMinimized, true},
-		{"minimized_focused_to_hidden", PanelMinimized, true, PanelHidden, true},
+		{"minimized_focused_to_normal", PanelMinimized, true, PanelNormal, false},
 		{"hidden_focused_to_normal", PanelHidden, true, PanelNormal, false},
 		{"normal_not_focused", PanelNormal, false, PanelNormal, false},
-		{"minimized_not_focused", PanelMinimized, false, PanelMinimized, false},
+		{"minimized_not_focused_to_normal", PanelMinimized, false, PanelNormal, false},
 		{"hidden_not_focused_to_normal", PanelHidden, false, PanelNormal, false},
 	}
 

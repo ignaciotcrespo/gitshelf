@@ -109,7 +109,7 @@ func HandleKey(key string, state State, ctx KeyContext) KeyResult {
 		r.State.WorktreeState = newState
 		if moveFocus {
 			r.State.Focus = r.State.Pivot
-		} else if !focused && newState != types.PanelHidden {
+		} else if !focused {
 			r.State.Focus = types.PanelWorktrees
 		}
 		r.Refresh = RefreshAll
@@ -221,12 +221,6 @@ func handleChangelistKey(key string, r KeyResult, ctx KeyContext) KeyResult {
 			}
 			for _, f := range ctx.CLFiles {
 				r.State.SelectedFiles[f] = true
-			}
-		} else if r.State.Focus == types.PanelChangelists && ctx.CLCount > 0 {
-			name := ctx.CLNames[r.State.CLSelected]
-			if name != ctx.UnversionedName {
-				r.SetActive = name
-				r.StatusMsg = fmt.Sprintf("Active: %s", name)
 			}
 		}
 		return r
@@ -396,7 +390,7 @@ func handleShelfKey(key string, r KeyResult, ctx KeyContext) KeyResult {
 		if ctx.ShelfCount > 0 {
 			r.StartPrompt = &PromptReq{
 				Mode:         types.PromptUnshelve,
-				DefaultValue: ctx.ActiveCL,
+				DefaultValue: ctx.DefaultName,
 				Target:       ctx.ShelfNames[r.State.ShelfSel],
 				Options:      ctx.CLNames,
 			}

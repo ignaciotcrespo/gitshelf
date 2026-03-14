@@ -22,7 +22,7 @@ var NavBindings = []KeyBinding{
 	{Key: "3", Display: "3", Short: "files", Desc: "Focus Files panel"},
 	{Key: "4", Display: "4", Short: "diff", Desc: "Cycle Diff panel (normal → maximized → hidden)"},
 	{Key: "5", Display: "5", Short: "log", Desc: "Cycle Git Log panel (normal → maximized → hidden)"},
-	{Key: "6", Display: "6", Short: "worktrees", Desc: "Cycle Worktrees panel (normal → minimized → hidden)"},
+	{Key: "6", Display: "6", Short: "worktrees", Desc: "Toggle Worktrees panel (normal ↔ minimized)"},
 	{Key: "tab", Display: "tab / shift+tab", Short: "cycle", Desc: "Cycle between panels"},
 	{Key: "up", Display: "j / ↑", Short: "up", Desc: "Move cursor up"},
 	{Key: "down", Display: "k / ↓", Short: "down", Desc: "Move cursor down"},
@@ -34,7 +34,6 @@ var NavBindings = []KeyBinding{
 // CLBindings are keys available when the Changelists panel is focused.
 var CLBindings = []KeyBinding{
 	{Key: "n", Display: "n", Short: "new", Desc: "New changelist"},
-	{Key: "a", Display: "a", Short: "active", Desc: "Set as active (new changes go here)"},
 	{Key: "r", Display: "r", Short: "rename", Desc: "Rename changelist"},
 	{Key: "d", Display: "d", Short: "delete", Desc: "Delete changelist"},
 	{Key: "s", Display: "s", Short: "shelve", Desc: "Shelve all files in changelist"},

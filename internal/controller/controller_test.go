@@ -289,7 +289,7 @@ func TestHandleKey_ShelfUnshelve(t *testing.T) {
 	s := NewState()
 	s.Focus = types.PanelShelves
 	s.Pivot = types.PanelShelves
-	ctx := KeyContext{ShelfCount: 1, ShelfNames: []string{"my-shelf"}, CLNames: []string{"Changes"}, ActiveCL: "Changes"}
+	ctx := KeyContext{ShelfCount: 1, ShelfNames: []string{"my-shelf"}, CLNames: []string{"Changes"}, DefaultName: "Changes"}
 	r := HandleKey("u", s, ctx)
 	if r.StartPrompt == nil {
 		t.Fatal("expected prompt")
@@ -333,26 +333,6 @@ func TestHandleKey_MoveFile(t *testing.T) {
 	}
 	if r.State.MoveFile != "a.go" {
 		t.Errorf("expected a.go, got %s", r.State.MoveFile)
-	}
-}
-
-func TestHandleKey_SetActive(t *testing.T) {
-	s := NewState()
-	s.Focus = types.PanelChangelists
-	ctx := KeyContext{CLCount: 1, CLNames: []string{"Changes"}, UnversionedName: "Unversioned Files"}
-	r := HandleKey("a", s, ctx)
-	if r.SetActive != "Changes" {
-		t.Errorf("expected SetActive=Changes, got %s", r.SetActive)
-	}
-}
-
-func TestHandleKey_SetActiveUnversioned(t *testing.T) {
-	s := NewState()
-	s.Focus = types.PanelChangelists
-	ctx := KeyContext{CLCount: 1, CLNames: []string{"Unversioned Files"}, UnversionedName: "Unversioned Files"}
-	r := HandleKey("a", s, ctx)
-	if r.SetActive != "" {
-		t.Errorf("should not set active for unversioned")
 	}
 }
 
@@ -1263,9 +1243,9 @@ func TestHandleKey_CopyPatch(t *testing.T) {
 // --- HandleKey "6": Worktree panel cycling ---
 
 func TestHandleKey_6(t *testing.T) {
-	t.Run("not focused, hidden to normal + focus", func(t *testing.T) {
+	t.Run("not focused, minimized to normal + focus", func(t *testing.T) {
 		s := NewState()
-		s.WorktreeState = types.PanelHidden
+		s.WorktreeState = types.PanelMinimized
 		s.Focus = types.PanelChangelists
 		kr := HandleKey("6", s, KeyContext{})
 		if kr.State.WorktreeState != types.PanelNormal {
@@ -1289,16 +1269,13 @@ func TestHandleKey_6(t *testing.T) {
 		}
 	})
 
-	t.Run("focused, minimized to hidden + focus to pivot", func(t *testing.T) {
+	t.Run("focused, minimized to normal", func(t *testing.T) {
 		s := NewState()
 		s.WorktreeState = types.PanelMinimized
 		s.Focus = types.PanelWorktrees
 		kr := HandleKey("6", s, KeyContext{})
-		if kr.State.WorktreeState != types.PanelHidden {
-			t.Errorf("expected Hidden, got %d", kr.State.WorktreeState)
-		}
-		if kr.State.Focus != kr.State.Pivot {
-			t.Errorf("expected focus on pivot, got %d", kr.State.Focus)
+		if kr.State.WorktreeState != types.PanelNormal {
+			t.Errorf("expected Normal, got %d", kr.State.WorktreeState)
 		}
 	})
 
