@@ -175,40 +175,6 @@ func TestHandleEnter(t *testing.T) {
 		}
 	})
 
-	t.Run("worktree select activates", func(t *testing.T) {
-		s := State{Focus: types.PanelWorktrees, WorktreeSel: 1, SelectedFiles: make(map[string]bool)}
-		wtCtx := KeyContext{
-			WorktreeCount:       2,
-			WorktreePaths:       []string{"/repo", "/repo-wt"},
-			CurrentWorktreePath: "/repo",
-		}
-		r := HandleEnter(&s, wtCtx)
-		if s.ActiveWorktreePath != "/repo-wt" {
-			t.Errorf("expected ActiveWorktreePath=/repo-wt, got %q", s.ActiveWorktreePath)
-		}
-		if r != RefreshAll {
-			t.Errorf("expected RefreshAll")
-		}
-		if s.CLSelected != 0 || s.ShelfSel != 0 {
-			t.Error("expected selection indices to reset")
-		}
-	})
-
-	t.Run("worktree select current toggles off", func(t *testing.T) {
-		s := State{Focus: types.PanelWorktrees, WorktreeSel: 0, ActiveWorktreePath: "/repo", SelectedFiles: make(map[string]bool)}
-		wtCtx := KeyContext{
-			WorktreeCount:       2,
-			WorktreePaths:       []string{"/repo", "/repo-wt"},
-			CurrentWorktreePath: "/repo",
-		}
-		r := HandleEnter(&s, wtCtx)
-		if s.ActiveWorktreePath != "" {
-			t.Errorf("expected empty ActiveWorktreePath, got %q", s.ActiveWorktreePath)
-		}
-		if r != RefreshAll {
-			t.Errorf("expected RefreshAll")
-		}
-	})
 }
 
 func TestHandleKey_NewChangelist(t *testing.T) {
@@ -1297,39 +1263,60 @@ func TestHandleKey_6(t *testing.T) {
 // --- Worktree Navigation ---
 
 func TestWorktreeNavigation(t *testing.T) {
+	wtCtx := KeyContext{
+		WorktreeCount:       3,
+		WorktreePaths:       []string{"/repo", "/repo-wt1", "/repo-wt2"},
+		CurrentWorktreePath: "/repo",
+	}
+
 	t.Run("MoveDown", func(t *testing.T) {
 		s := State{Focus: types.PanelWorktrees, WorktreeSel: 0}
-		ctx := KeyContext{WorktreeCount: 3}
-		MoveDown(&s, ctx)
+		r := MoveDown(&s, wtCtx)
 		if s.WorktreeSel != 1 {
 			t.Errorf("expected 1, got %d", s.WorktreeSel)
+		}
+		if s.ActiveWorktreePath != "/repo-wt1" {
+			t.Errorf("expected active /repo-wt1, got %q", s.ActiveWorktreePath)
+		}
+		if r != RefreshWorktree {
+			t.Errorf("expected RefreshWorktree, got %d", r)
 		}
 	})
 
 	t.Run("MoveDown at bottom", func(t *testing.T) {
 		s := State{Focus: types.PanelWorktrees, WorktreeSel: 2}
-		ctx := KeyContext{WorktreeCount: 3}
-		MoveDown(&s, ctx)
+		r := MoveDown(&s, wtCtx)
 		if s.WorktreeSel != 2 {
 			t.Errorf("expected 2, got %d", s.WorktreeSel)
+		}
+		if r != RefreshNone {
+			t.Errorf("expected RefreshNone at bottom, got %d", r)
 		}
 	})
 
 	t.Run("MoveUp", func(t *testing.T) {
 		s := State{Focus: types.PanelWorktrees, WorktreeSel: 1}
-		ctx := KeyContext{WorktreeCount: 3}
-		MoveUp(&s, ctx)
+		r := MoveUp(&s, wtCtx)
 		if s.WorktreeSel != 0 {
 			t.Errorf("expected 0, got %d", s.WorktreeSel)
+		}
+		// Moving to index 0 = current worktree → ActiveWorktreePath cleared
+		if s.ActiveWorktreePath != "" {
+			t.Errorf("expected empty active path for current worktree, got %q", s.ActiveWorktreePath)
+		}
+		if r != RefreshWorktree {
+			t.Errorf("expected RefreshWorktree, got %d", r)
 		}
 	})
 
 	t.Run("MoveUp at top", func(t *testing.T) {
 		s := State{Focus: types.PanelWorktrees, WorktreeSel: 0}
-		ctx := KeyContext{WorktreeCount: 3}
-		MoveUp(&s, ctx)
+		r := MoveUp(&s, wtCtx)
 		if s.WorktreeSel != 0 {
 			t.Errorf("expected 0, got %d", s.WorktreeSel)
+		}
+		if r != RefreshNone {
+			t.Errorf("expected RefreshNone at top, got %d", r)
 		}
 	})
 }

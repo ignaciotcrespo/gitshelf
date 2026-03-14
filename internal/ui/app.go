@@ -26,7 +26,11 @@ import (
 // diffLoadMsg is sent after a debounce delay to trigger diff loading.
 type diffLoadMsg struct{ seq int }
 
+// worktreeLoadMsg is sent after a debounce delay to trigger worktree switch.
+type worktreeLoadMsg struct{ seq int }
+
 const diffDebounce = 150 * time.Millisecond
+const worktreeDebounce = 200 * time.Millisecond
 
 func init() {
 	panel.ActiveBorderStyle = activeBorderStyle
@@ -77,6 +81,9 @@ type Model struct {
 
 	// Debounce for diff loading
 	diffSeq int // incremented on each request; only the latest fires
+
+	// Debounce for worktree switching
+	worktreeSeq int
 
 	// Original gitshelf directory (for switching back from worktree)
 	gitshelfDir string
@@ -186,6 +193,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case diffLoadMsg:
 		if msg.seq == m.diffSeq {
 			m.loadDiff()
+		}
+		return m, nil
+
+	case worktreeLoadMsg:
+		if msg.seq == m.worktreeSeq {
+			m.refresh()
 		}
 		return m, nil
 
@@ -342,6 +355,34 @@ func (m *Model) scheduleDiffLoad() tea.Cmd {
 	})
 }
 
+// activateAndScheduleWorktree sets ActiveWorktreePath from WorktreeSel and schedules debounced refresh.
+func (m *Model) activateAndScheduleWorktree() tea.Cmd {
+	if m.state.WorktreeSel < 0 || m.state.WorktreeSel >= len(m.worktrees) {
+		return nil
+	}
+	wt := m.worktrees[m.state.WorktreeSel]
+	if wt.IsCurrent {
+		m.state.ActiveWorktreePath = ""
+	} else {
+		m.state.ActiveWorktreePath = wt.Path
+	}
+	m.state.CLSelected = 0
+	m.state.CLFileSel = 0
+	m.state.ShelfSel = 0
+	m.state.ShelfFileSel = 0
+	m.state.SelectedFiles = make(map[string]bool)
+	return m.scheduleWorktreeSwitch()
+}
+
+// scheduleWorktreeSwitch returns a tea.Cmd that will switch worktree after a debounce delay.
+func (m *Model) scheduleWorktreeSwitch() tea.Cmd {
+	m.worktreeSeq++
+	seq := m.worktreeSeq
+	return tea.Tick(worktreeDebounce, func(time.Time) tea.Msg {
+		return worktreeLoadMsg{seq: seq}
+	})
+}
+
 const headerLines = 1 // branch header above panels
 
 func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
@@ -418,6 +459,8 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 				if m.state.CLFileSel != prevFile || m.state.ShelfFileSel != prevShelfFile {
 					return m.scheduleDiffLoad()
 				}
+			case types.PanelWorktrees:
+				return m.activateAndScheduleWorktree()
 			}
 		}
 	}
@@ -435,6 +478,8 @@ func (m *Model) afterScroll(pid types.PanelID) tea.Cmd {
 		return m.scheduleDiffLoad()
 	case types.PanelFiles:
 		return m.scheduleDiffLoad()
+	case types.PanelWorktrees:
+		return m.activateAndScheduleWorktree()
 	}
 	// Diff, Log — no dependent reload needed
 	return nil

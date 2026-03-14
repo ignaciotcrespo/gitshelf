@@ -29,4 +29,5 @@ const (
 	RefreshCLFiles                // reload changelist files (implies diff)
 	RefreshShelfFiles             // reload shelf files (implies diff)
 	RefreshAll                    // reload everything
+	RefreshWorktree               // debounced worktree switch + reload
 )

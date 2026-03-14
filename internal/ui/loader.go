@@ -161,7 +161,7 @@ func (m *Model) loadDiff() {
 }
 
 func (m *Model) loadWorktrees() {
-	wts, err := git.WorktreeList()
+	wts, err := git.WorktreeList(filepath.Dir(m.gitshelfDir))
 	if err != nil {
 		m.worktrees = nil
 		return
@@ -202,6 +202,8 @@ func (m *Model) applyRefresh(flag controller.RefreshFlag) tea.Cmd {
 	case flag&controller.RefreshAll != 0:
 		m.refresh()
 		return nil
+	case flag&controller.RefreshWorktree != 0:
+		return m.scheduleWorktreeSwitch()
 	case flag&controller.RefreshCLFiles != 0:
 		m.loadChangelistFilesNoDiff()
 		return m.scheduleDiffLoad()

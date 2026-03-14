@@ -674,7 +674,7 @@ func TestWorktreeList(t *testing.T) {
 	repoRoot = dir
 
 	// Single worktree (main repo)
-	wts, err := WorktreeList()
+	wts, err := WorktreeList("")
 	if err != nil {
 		t.Fatalf("WorktreeList() error: %v", err)
 	}
@@ -703,7 +703,7 @@ func TestWorktreeList(t *testing.T) {
 	}
 	wtDir, _ = filepath.EvalSymlinks(wtDir)
 
-	wts, err = WorktreeList()
+	wts, err = WorktreeList("")
 	if err != nil {
 		t.Fatalf("WorktreeList() error: %v", err)
 	}

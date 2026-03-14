@@ -478,7 +478,9 @@ type Worktree struct {
 }
 
 // WorktreeList returns all worktrees for the current repository.
-func WorktreeList() ([]Worktree, error) {
+// launchPath is the worktree where gitshelf was launched; it determines IsCurrent.
+// If empty, falls back to RepoRoot().
+func WorktreeList(launchPath string) ([]Worktree, error) {
 	out, err := query("worktree", "list", "--porcelain")
 	if err != nil {
 		return nil, err
@@ -487,7 +489,10 @@ func WorktreeList() ([]Worktree, error) {
 		return nil, nil
 	}
 
-	root, _ := RepoRoot()
+	root := launchPath
+	if root == "" {
+		root, _ = RepoRoot()
+	}
 
 	var worktrees []Worktree
 	var current Worktree

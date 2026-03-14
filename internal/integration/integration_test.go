@@ -184,7 +184,7 @@ func (app *TestApp) syncStores() {
 }
 
 func (app *TestApp) loadWorktrees() {
-	wts, err := git.WorktreeList()
+	wts, err := git.WorktreeList(filepath.Dir(app.gitshelfDir))
 	if err != nil {
 		app.worktrees = nil
 		return
@@ -360,6 +360,8 @@ func (app *TestApp) CopyPatch() string {
 func (app *TestApp) applyRefresh(flag controller.RefreshFlag) {
 	switch {
 	case flag&controller.RefreshAll != 0:
+		app.refresh()
+	case flag&controller.RefreshWorktree != 0:
 		app.refresh()
 	case flag&controller.RefreshCLFiles != 0:
 		app.loadCLFiles()
@@ -2359,23 +2361,34 @@ func newTestAppWithWorktree(t *testing.T) (*TestApp, string, string) {
 // activateWorktree simulates selecting and activating a worktree by path.
 func (app *TestApp) activateWorktree(path string) {
 	app.t.Helper()
-	// Find the worktree index
+	// Find the worktree index and navigate to it
 	for i, wt := range app.worktrees {
 		if wt.Path == path {
 			app.state.WorktreeSel = i
 			break
 		}
 	}
-	// Simulate Enter on worktrees panel
-	app.state.Focus = types.PanelWorktrees
-	keyCtx := app.buildKeyContext()
-	flag := controller.HandleEnter(&app.state, keyCtx)
-	app.applyRefresh(flag)
-	if flag&controller.RefreshAll != 0 {
-		// already refreshed by applyRefresh
+	// Set active worktree path (toggle off if selecting current worktree)
+	if path == app.state.ActiveWorktreePath {
+		app.state.ActiveWorktreePath = ""
 	} else {
-		app.refresh()
+		// Check if this is the current worktree
+		for _, wt := range app.worktrees {
+			if wt.Path == path && wt.IsCurrent {
+				app.state.ActiveWorktreePath = ""
+				break
+			} else if wt.Path == path {
+				app.state.ActiveWorktreePath = path
+				break
+			}
+		}
 	}
+	app.state.CLSelected = 0
+	app.state.CLFileSel = 0
+	app.state.ShelfSel = 0
+	app.state.ShelfFileSel = 0
+	app.state.SelectedFiles = make(map[string]bool)
+	app.refresh()
 	app.state.Focus = types.PanelChangelists
 }
 

@@ -64,6 +64,7 @@ const (
 	RefreshCLFiles    = tui.RefreshCLFiles
 	RefreshShelfFiles = tui.RefreshShelfFiles
 	RefreshAll        = tui.RefreshAll
+	RefreshWorktree   = tui.RefreshWorktree
 )
 
 // KeyContext is a read-only snapshot of data the controller needs for decisions.
