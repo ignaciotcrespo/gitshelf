@@ -532,21 +532,8 @@ func (app *TestApp) handlePromptResult(result *prompt.Result) {
 
 	switch result.Mode {
 	case types.PromptShelveFiles:
-		fileCount := 0
-		if len(ctx.SelectedFiles) > 0 {
-			fileCount = len(ctx.SelectedFiles)
-		} else if app.clState != nil {
-			for _, cl := range app.clState.Changelists {
-				if cl.Name == ctx.CLName {
-					fileCount = len(cl.Files)
-					break
-				}
-			}
-		}
-		app.pending = result
-		app.pendingCtx = ctx
-		app.prompt.StartConfirm(types.ConfirmShelve,
-			result.Value+":"+itoa(fileCount))
+		action.Execute(result, &app.stores, app.logger, ctx)
+		app.refresh()
 
 	case types.PromptUnshelve:
 		var conflicting int
@@ -595,11 +582,6 @@ func (app *TestApp) handlePromptResult(result *prompt.Result) {
 	case types.PromptConfirm:
 		if result.Confirmed {
 			switch result.ConfirmAction {
-			case types.ConfirmShelve:
-				if app.pending != nil {
-					action.Execute(app.pending, &app.stores, app.logger, app.pendingCtx)
-					app.refresh()
-				}
 			case types.ConfirmUnshelve:
 				if app.pending != nil {
 					app.pendingCtx.ForceUnshelve = true
@@ -943,7 +925,6 @@ func TestShelveRestoresFiles(t *testing.T) {
 
 	app.PressKey("s")
 	app.TypePrompt("my-shelf")
-	app.Confirm()
 
 	// File should be restored to original content
 	if got := app.fileContent("README.md"); got != "init" {
@@ -977,7 +958,6 @@ func TestShelveFromCLPanel(t *testing.T) {
 
 	app.PressKey("s")
 	app.TypePrompt("cl-shelf")
-	app.Confirm()
 
 	status := app.gitStatus()
 	if strings.Contains(status, "README.md") {
@@ -995,7 +975,6 @@ func TestUnshelve(t *testing.T) {
 	app.SelectFile(app.fileIndex("README.md"))
 	app.PressKey("s")
 	app.TypePrompt("test-shelf")
-	app.Confirm()
 
 	// Switch to shelves panel
 	app.PressKey("2")
@@ -1025,7 +1004,6 @@ func TestShelveUnshelveRoundTrip(t *testing.T) {
 	app.SelectFile(app.fileIndex("README.md"))
 	app.PressKey("s")
 	app.TypePrompt("roundtrip")
-	app.Confirm()
 
 	// Verify file restored to HEAD
 	if got := app.fileContent("README.md"); got != "init" {
@@ -1058,7 +1036,6 @@ func TestUntrackedFileShelveUnshelve(t *testing.T) {
 
 	app.PressKey("s")
 	app.TypePrompt("untracked-shelf")
-	app.Confirm()
 
 	// File should be gone
 	if app.fileExists("new-file.txt") {
@@ -1435,7 +1412,6 @@ func TestRenameShelf_GitSafe(t *testing.T) {
 	app.SelectFile(app.fileIndex("shelf-rename.txt"))
 	app.PressKey("s")
 	app.TypePrompt("OldName")
-	app.Confirm()
 
 	snap := app.gitSnapshot()
 
@@ -1457,7 +1433,6 @@ func TestDropShelf_GitSafe(t *testing.T) {
 	app.SelectFile(app.fileIndex("shelf-drop.txt"))
 	app.PressKey("s")
 	app.TypePrompt("DropMe")
-	app.Confirm()
 
 	snap := app.gitSnapshot()
 
@@ -1569,7 +1544,6 @@ func TestShelveUnshelve_FileWithoutTrailingNewline(t *testing.T) {
 	// Shelve
 	app.PressKey("s")
 	app.TypePrompt("noeol-shelf")
-	app.Confirm()
 
 	if app.fileExists("noeol.txt") {
 		t.Error("noeol.txt should be gone after shelve")
@@ -1617,7 +1591,6 @@ func TestShelveUnshelve_MultipleFilesWithoutTrailingNewline(t *testing.T) {
 	// Shelve
 	app.PressKey("s")
 	app.TypePrompt("multi-noeol")
-	app.Confirm()
 
 	for name := range files {
 		if app.fileExists(name) {
@@ -1656,7 +1629,6 @@ func TestShelveUnshelve_MixedNewlineFiles(t *testing.T) {
 	// Shelve
 	app.PressKey("s")
 	app.TypePrompt("mixed-shelf")
-	app.Confirm()
 
 	// Unshelve
 	app.PressKey("2")
@@ -1697,7 +1669,6 @@ func TestShelveUnshelve_AutocrlfTrue(t *testing.T) {
 	// Shelve
 	app.PressKey("s")
 	app.TypePrompt("crlf-shelf")
-	app.Confirm()
 
 	// File should be gone or restored to HEAD (which doesn't have crlf.txt)
 	if app.fileExists("crlf.txt") {
@@ -1744,7 +1715,6 @@ func TestShelveUnshelve_AutocrlfTrue_ExistingFile(t *testing.T) {
 	// Shelve
 	app.PressKey("s")
 	app.TypePrompt("existing-crlf")
-	app.Confirm()
 
 	// README.md should be restored to HEAD content
 	headContent := strings.ReplaceAll(app.fileContent("README.md"), "\r\n", "\n")
@@ -1838,7 +1808,6 @@ func TestCopyPatch_Shelf(t *testing.T) {
 	app.SelectFile(app.fileIndex("shelved.txt"))
 	app.PressKey("s")
 	app.TypePrompt("my-shelf")
-	app.Confirm()
 
 	// Switch to shelves and copy patch
 	app.PressKey("2")
@@ -1905,7 +1874,6 @@ func TestCopyPatch_Files_ShelfContext(t *testing.T) {
 	app.SelectFile(app.fileIndex("sf.txt"))
 	app.PressKey("s")
 	app.TypePrompt("file-shelf")
-	app.Confirm()
 
 	// Switch to shelves, then focus files panel (shelf context)
 	app.PressKey("2")
@@ -2010,7 +1978,6 @@ func TestDuplicateShelfNames_CreateTwo(t *testing.T) {
 	app.SelectFile(app.fileIndex("README.md"))
 	app.PressKey("s")
 	app.TypePrompt("same-name")
-	app.Confirm()
 
 	// Shelve #2: README.md with content B
 	app.WriteFile("README.md", "content-B")
@@ -2018,7 +1985,6 @@ func TestDuplicateShelfNames_CreateTwo(t *testing.T) {
 	app.SelectFile(app.fileIndex("README.md"))
 	app.PressKey("s")
 	app.TypePrompt("same-name")
-	app.Confirm()
 
 	shelves, err := app.stores.Shelf.List()
 	if err != nil {
@@ -2046,7 +2012,6 @@ func TestDuplicateShelfNames_UnshelveCorrectOne(t *testing.T) {
 	app.SelectFile(app.fileIndex("README.md"))
 	app.PressKey("s")
 	app.TypePrompt("dup-unshelve")
-	app.Confirm()
 
 	time.Sleep(10 * time.Millisecond) // ensure distinct timestamps
 
@@ -2056,7 +2021,6 @@ func TestDuplicateShelfNames_UnshelveCorrectOne(t *testing.T) {
 	app.SelectFile(app.fileIndex("README.md"))
 	app.PressKey("s")
 	app.TypePrompt("dup-unshelve")
-	app.Confirm()
 
 	// List is newest-first, so shelves[0]=B, shelves[1]=A
 	app.PressKey("2")
@@ -2086,7 +2050,6 @@ func TestDuplicateShelfNames_UnshelveOlderOne(t *testing.T) {
 	app.SelectFile(app.fileIndex("README.md"))
 	app.PressKey("s")
 	app.TypePrompt("dup-older")
-	app.Confirm()
 
 	time.Sleep(10 * time.Millisecond)
 
@@ -2096,7 +2059,6 @@ func TestDuplicateShelfNames_UnshelveOlderOne(t *testing.T) {
 	app.SelectFile(app.fileIndex("README.md"))
 	app.PressKey("s")
 	app.TypePrompt("dup-older")
-	app.Confirm()
 
 	// List is newest-first: shelves[0]=B, shelves[1]=A
 	app.PressKey("2")
@@ -2123,7 +2085,6 @@ func TestDuplicateShelfNames_DropOne(t *testing.T) {
 	app.SelectFile(app.fileIndex("README.md"))
 	app.PressKey("s")
 	app.TypePrompt("dup-drop")
-	app.Confirm()
 
 	time.Sleep(10 * time.Millisecond)
 
@@ -2132,7 +2093,6 @@ func TestDuplicateShelfNames_DropOne(t *testing.T) {
 	app.SelectFile(app.fileIndex("README.md"))
 	app.PressKey("s")
 	app.TypePrompt("dup-drop")
-	app.Confirm()
 
 	app.PressKey("2")
 	app.refresh()
@@ -2174,7 +2134,6 @@ func TestDuplicateShelfNames_RenameOne(t *testing.T) {
 	app.SelectFile(app.fileIndex("README.md"))
 	app.PressKey("s")
 	app.TypePrompt("dup-rename")
-	app.Confirm()
 
 	time.Sleep(10 * time.Millisecond)
 
@@ -2183,7 +2142,6 @@ func TestDuplicateShelfNames_RenameOne(t *testing.T) {
 	app.SelectFile(app.fileIndex("README.md"))
 	app.PressKey("s")
 	app.TypePrompt("dup-rename")
-	app.Confirm()
 
 	app.PressKey("2")
 	app.refresh()
@@ -2225,7 +2183,6 @@ func TestDuplicateShelfNames_CopyPatchCorrectOne(t *testing.T) {
 	app.SelectFile(app.fileIndex("README.md"))
 	app.PressKey("s")
 	app.TypePrompt("dup-patch")
-	app.Confirm()
 
 	time.Sleep(10 * time.Millisecond)
 
@@ -2234,7 +2191,6 @@ func TestDuplicateShelfNames_CopyPatchCorrectOne(t *testing.T) {
 	app.SelectFile(app.fileIndex("README.md"))
 	app.PressKey("s")
 	app.TypePrompt("dup-patch")
-	app.Confirm()
 
 	// Focus shelves panel, select the older shelf (A)
 	app.PressKey("2")
@@ -2263,7 +2219,6 @@ func TestDuplicateShelfNames_ViewDiffCorrectOne(t *testing.T) {
 	app.SelectFile(app.fileIndex("README.md"))
 	app.PressKey("s")
 	app.TypePrompt("dup-diff")
-	app.Confirm()
 
 	time.Sleep(10 * time.Millisecond)
 
@@ -2272,7 +2227,6 @@ func TestDuplicateShelfNames_ViewDiffCorrectOne(t *testing.T) {
 	app.SelectFile(app.fileIndex("README.md"))
 	app.PressKey("s")
 	app.TypePrompt("dup-diff")
-	app.Confirm()
 
 	// Focus shelves panel
 	app.PressKey("2")
@@ -2305,7 +2259,6 @@ func TestDuplicateShelfNames_GitSafe(t *testing.T) {
 	app.SelectFile(app.fileIndex("README.md"))
 	app.PressKey("s")
 	app.TypePrompt("safe-dup")
-	app.Confirm()
 
 	time.Sleep(10 * time.Millisecond)
 
@@ -2314,7 +2267,6 @@ func TestDuplicateShelfNames_GitSafe(t *testing.T) {
 	app.SelectFile(app.fileIndex("README.md"))
 	app.PressKey("s")
 	app.TypePrompt("safe-dup")
-	app.Confirm()
 
 	// Snapshot AFTER shelves are created (files are restored to HEAD)
 	snap := app.gitSnapshot()
@@ -2806,7 +2758,6 @@ func TestWT_Shelve_InActiveWorktree(t *testing.T) {
 	app.selectAllFiles()
 	app.PressKey("s")
 	app.TypePrompt("wt-shelf")
-	app.Confirm()
 
 	// Verify shelf exists in worktree's .gitshelf
 	wtShelfStore := shelf.NewStore(filepath.Join(wtDir, ".gitshelf"))
@@ -2863,7 +2814,6 @@ func TestWT_Shelve_DoesNotAffectInactiveWorktree(t *testing.T) {
 	app.selectAllFiles()
 	app.PressKey("s")
 	app.TypePrompt("wt-shelf")
-	app.Confirm()
 
 	// CRITICAL: main worktree's file must still have "main-version"
 	mainContent := fileContentAt(t, mainDir, "shared.go")
@@ -2890,7 +2840,6 @@ func TestWT_Unshelve_InActiveWorktree(t *testing.T) {
 	app.selectAllFiles()
 	app.PressKey("s")
 	app.TypePrompt("restore-test")
-	app.Confirm()
 
 	mainSnap := gitSnapshotAt(t, mainDir)
 
@@ -2923,7 +2872,6 @@ func TestWT_Unshelve_DoesNotAffectInactiveWorktree(t *testing.T) {
 	app.selectAllFiles()
 	app.PressKey("s")
 	app.TypePrompt("feature-shelf")
-	app.Confirm()
 
 	// Write something different in main
 	writeTrackedFileAt(t, mainDir, "main-only.go", "main-code")
@@ -3287,7 +3235,6 @@ func TestWT_DropShelf_InActiveWorktree(t *testing.T) {
 	app.selectAllFiles()
 	app.PressKey("s")
 	app.TypePrompt("drop-me")
-	app.Confirm()
 
 	mainSnap := gitSnapshotAt(t, mainDir)
 
@@ -3337,7 +3284,6 @@ func TestWT_SequentialOperations(t *testing.T) {
 	app.selectAllFiles()
 	app.PressKey("s")
 	app.TypePrompt("seq-shelf")
-	app.Confirm()
 
 	// 4. Switch to main — verify it's clean
 	mainSnap := gitSnapshotAt(t, mainDir)
@@ -3436,7 +3382,6 @@ func TestWT_Unshelve_ConflictBackupInActiveWorktree(t *testing.T) {
 	app.selectAllFiles()
 	app.PressKey("s")
 	app.TypePrompt("conflict-shelf")
-	app.Confirm()
 
 	// Step 2: Create a DIFFERENT change to the same file in the worktree
 	// (this creates a conflict for unshelve)
@@ -3505,7 +3450,6 @@ func TestWT_Shelve_RestartShowsCorrectState(t *testing.T) {
 	app.selectAllFiles()
 	app.PressKey("s")
 	app.TypePrompt("wt-shelf")
-	app.Confirm()
 
 	// "Restart" — create a fresh TestApp pointing at main (simulates app restart)
 	mainGitshelfDir := filepath.Join(mainDir, ".gitshelf")
@@ -3608,7 +3552,6 @@ func TestWT_Shelve_MultipleSwitches(t *testing.T) {
 	app.selectAllFiles()
 	app.PressKey("s")
 	app.TypePrompt("wt-shelf-1")
-	app.Confirm()
 
 	// Switch back to main
 	app.activateWorktree(wtDir) // toggle off
@@ -3624,7 +3567,6 @@ func TestWT_Shelve_MultipleSwitches(t *testing.T) {
 	app.selectAllFiles()
 	app.PressKey("s")
 	app.TypePrompt("main-shelf-1")
-	app.Confirm()
 
 	// Switch to WT — it should have the shelf, not main's shelf
 	app.activateWorktree(wtDir)
@@ -3693,7 +3635,6 @@ func TestWT_Shelve_RestoreTargetsCorrectWorktree(t *testing.T) {
 	app.selectAllFiles()
 	app.PressKey("s")
 	app.TypePrompt("readme-shelf")
-	app.Confirm()
 
 	// After shelving in WT, README.md in WT should be restored to "init" (HEAD)
 	wtContent := fileContentAt(t, wtDir, "README.md")

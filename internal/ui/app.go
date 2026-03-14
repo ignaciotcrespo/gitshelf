@@ -547,23 +547,9 @@ func (m *Model) handlePromptResult(result *prompt.Result) bool {
 
 	switch result.Mode {
 	case types.PromptShelveFiles:
-		// Count files that will be shelved
-		fileCount := 0
-		if len(ctx.SelectedFiles) > 0 {
-			fileCount = len(ctx.SelectedFiles)
-		} else if m.clState != nil {
-			for _, cl := range m.clState.Changelists {
-				if cl.Name == ctx.CLName {
-					fileCount = len(cl.Files)
-					break
-				}
-			}
-		}
-		m.pendingResult = result
-		m.pendingCtx = ctx
-		m.prompt.StartConfirm(types.ConfirmShelve,
-			fmt.Sprintf("%s:%d", result.Value, fileCount))
-		return true
+		action.Execute(result, &m.stores, m, ctx)
+		m.refresh()
+		return false
 
 	case types.PromptUnshelve:
 		// Check if any shelf files already exist in working tree
@@ -618,11 +604,6 @@ func (m *Model) handlePromptResult(result *prompt.Result) bool {
 	case types.PromptConfirm:
 		if result.Confirmed {
 			switch result.ConfirmAction {
-			case types.ConfirmShelve:
-				if m.pendingResult != nil {
-					action.Execute(m.pendingResult, &m.stores, m, m.pendingCtx)
-					m.refresh()
-				}
 			case types.ConfirmUnshelve:
 				if m.pendingResult != nil {
 					m.pendingCtx.ForceUnshelve = true

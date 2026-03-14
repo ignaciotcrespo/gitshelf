@@ -70,8 +70,6 @@ func (g gitshelfLabeler) ConfirmMessage(action types.ConfirmAction, target strin
 		return fmt.Sprintf("Drop shelf '%s'", target)
 	case types.ConfirmAcceptDirty:
 		return formatAcceptDirtyMessage(target)
-	case types.ConfirmShelve:
-		return formatShelveMessage(target)
 	case types.ConfirmUnshelve:
 		return formatUnshelveMessage(target)
 	case types.ConfirmPasteFullContent:
@@ -176,16 +174,6 @@ func formatAcceptDirtyMessage(target string) string {
 		return fmt.Sprintf("Accept all %s dirty file(s) in '%s' as baseline", count, name)
 	}
 	return fmt.Sprintf("Accept %s dirty file(s) in '%s' as baseline", count, name)
-}
-
-// formatShelveMessage builds the confirm message for shelve.
-// Target format: "<name>:<fileCount>"
-func formatShelveMessage(target string) string {
-	parts := strings.SplitN(target, ":", 2)
-	if len(parts) != 2 {
-		return "Shelve files"
-	}
-	return fmt.Sprintf("Shelve '%s' — save %s file(s) and revert working changes", parts[0], parts[1])
 }
 
 // formatUnshelveMessage builds the confirm message for unshelve.
