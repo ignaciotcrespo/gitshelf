@@ -666,3 +666,75 @@ func TestApplyPatch(t *testing.T) {
 		t.Errorf("after patch, content = %q, want %q", string(data), "patched content\n")
 	}
 }
+
+func TestWorktreeList(t *testing.T) {
+	dir := setupRepo(t)
+	// Resolve symlinks (macOS /var -> /private/var)
+	dir, _ = filepath.EvalSymlinks(dir)
+	repoRoot = dir
+
+	// Single worktree (main repo)
+	wts, err := WorktreeList()
+	if err != nil {
+		t.Fatalf("WorktreeList() error: %v", err)
+	}
+	if len(wts) != 1 {
+		t.Fatalf("expected 1 worktree, got %d", len(wts))
+	}
+	if wts[0].Path != dir {
+		t.Errorf("worktree path = %q, want %q", wts[0].Path, dir)
+	}
+	if !wts[0].IsCurrent {
+		t.Error("expected main worktree to be marked as current")
+	}
+	if wts[0].Branch == "" {
+		t.Error("expected worktree to have a branch")
+	}
+	if wts[0].Commit == "" {
+		t.Error("expected worktree to have a commit")
+	}
+
+	// Add a second worktree
+	wtDir := filepath.Join(t.TempDir(), "second-wt")
+	cmd := exec.Command("git", "worktree", "add", "-b", "feature-x", wtDir)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git worktree add failed: %v\n%s", err, out)
+	}
+	wtDir, _ = filepath.EvalSymlinks(wtDir)
+
+	wts, err = WorktreeList()
+	if err != nil {
+		t.Fatalf("WorktreeList() error: %v", err)
+	}
+	if len(wts) != 2 {
+		t.Fatalf("expected 2 worktrees, got %d", len(wts))
+	}
+
+	// Verify both entries
+	foundMain := false
+	foundSecond := false
+	for _, wt := range wts {
+		if wt.Path == dir {
+			foundMain = true
+			if !wt.IsCurrent {
+				t.Error("main worktree should be current")
+			}
+		}
+		if wt.Path == wtDir {
+			foundSecond = true
+			if wt.IsCurrent {
+				t.Error("second worktree should not be current")
+			}
+			if wt.Branch != "feature-x" {
+				t.Errorf("second worktree branch = %q, want %q", wt.Branch, "feature-x")
+			}
+		}
+	}
+	if !foundMain {
+		t.Error("main worktree not found in list")
+	}
+	if !foundSecond {
+		t.Error("second worktree not found in list")
+	}
+}

@@ -33,6 +33,10 @@ func MoveUp(s *State, ctx KeyContext) RefreshFlag {
 		}
 	case types.PanelLog:
 		s.LogScroll++
+	case types.PanelWorktrees:
+		if s.WorktreeSel > 0 {
+			s.WorktreeSel--
+		}
 	}
 	return RefreshNone
 }
@@ -68,12 +72,16 @@ func MoveDown(s *State, ctx KeyContext) RefreshFlag {
 		if s.LogScroll > 0 {
 			s.LogScroll--
 		}
+	case types.PanelWorktrees:
+		if s.WorktreeSel < ctx.WorktreeCount-1 {
+			s.WorktreeSel++
+		}
 	}
 	return RefreshNone
 }
 
 // HandleEnter handles the enter key. Returns what needs refreshing.
-func HandleEnter(s *State) RefreshFlag {
+func HandleEnter(s *State, ctx KeyContext) RefreshFlag {
 	switch s.Focus {
 	case types.PanelChangelists, types.PanelShelves:
 		s.Focus = types.PanelFiles
@@ -81,6 +89,23 @@ func HandleEnter(s *State) RefreshFlag {
 	case types.PanelFiles:
 		s.Focus = types.PanelDiff
 		return RefreshDiff
+	case types.PanelWorktrees:
+		if s.WorktreeSel >= 0 && s.WorktreeSel < len(ctx.WorktreePaths) {
+			path := ctx.WorktreePaths[s.WorktreeSel]
+			if path == s.ActiveWorktreePath || path == ctx.CurrentWorktreePath {
+				// Toggle off: back to current worktree
+				s.ActiveWorktreePath = ""
+			} else {
+				s.ActiveWorktreePath = path
+			}
+			// Reset selection indices for new data source
+			s.CLSelected = 0
+			s.CLFileSel = 0
+			s.ShelfSel = 0
+			s.ShelfFileSel = 0
+			s.SelectedFiles = make(map[string]bool)
+			return RefreshAll
+		}
 	}
 	return RefreshNone
 }

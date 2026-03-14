@@ -56,6 +56,8 @@ func (g gitshelfLabeler) PromptLabel(mode types.PromptMode) string {
 		return "Push to remote"
 	case types.PromptPull:
 		return "Pull from remote"
+	case types.PromptPasteChangelist:
+		return "Paste mode"
 	}
 	return ""
 }
@@ -72,6 +74,8 @@ func (g gitshelfLabeler) ConfirmMessage(action types.ConfirmAction, target strin
 		return formatShelveMessage(target)
 	case types.ConfirmUnshelve:
 		return formatUnshelveMessage(target)
+	case types.ConfirmPasteFullContent:
+		return fmt.Sprintf("Overwrite %s files in working tree?", target)
 	}
 	return ""
 }

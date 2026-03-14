@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -60,6 +61,7 @@ type Model struct {
 	behind     int
 	dirtyFiles map[string]bool
 	dirtyCLs   map[string]bool
+	worktrees  []git.Worktree
 
 	// Prompt
 	prompt        prompt.Prompt
@@ -75,6 +77,9 @@ type Model struct {
 
 	// Debounce for diff loading
 	diffSeq int // incremented on each request; only the latest fires
+
+	// Original gitshelf directory (for switching back from worktree)
+	gitshelfDir string
 
 	// Version string (set via ldflags)
 	version string
@@ -118,6 +123,7 @@ func NewModel(gitshelfDir, version string) Model {
 			{ID: types.PanelFiles, Title: "Files", Num: 3},
 			{ID: types.PanelDiff, Title: "Diff", Num: 4, Toggle: true},
 			{ID: types.PanelLog, Title: "Log", Num: 5, Toggle: true},
+			{ID: types.PanelWorktrees, Title: "Worktrees", Num: 6},
 		},
 		TabFlow: func(focus, pivot tui.PanelID, panelStates map[tui.PanelID]tui.PanelState) []tui.PanelID {
 			flow := []tui.PanelID{pivot, types.PanelFiles}
@@ -131,16 +137,23 @@ func NewModel(gitshelfDir, version string) Model {
 	m := Model{
 		state:        controller.NewState(),
 		fw:           fw,
-		panelRegions: make(map[types.PanelID]panel.Region, 5),
+		panelRegions: make(map[types.PanelID]panel.Region, 6),
 		stores: action.Stores{
 			CL:    clStore,
 			Shelf: shelfStore,
 		},
-		version: version,
+		gitshelfDir: gitshelfDir,
+		version:     version,
 	}
 
 	m.syncFwState()
 	m.refresh()
+
+	// Default worktree panel state: Hidden if ≤1 worktree, Normal if 2+
+	if len(m.worktrees) > 1 {
+		m.state.WorktreeState = types.PanelNormal
+	}
+
 	return m
 }
 
@@ -150,6 +163,7 @@ func (m *Model) syncFwState() {
 	m.fw.State.Pivot = m.state.Pivot
 	m.fw.State.PanelStates[types.PanelDiff] = m.state.DiffState
 	m.fw.State.PanelStates[types.PanelLog] = m.state.LogState
+	m.fw.State.PanelStates[types.PanelWorktrees] = m.state.WorktreeState
 }
 
 // --- Bubbletea interface ---
@@ -255,19 +269,35 @@ func (m *Model) buildKeyContext() controller.KeyContext {
 		tabFlow = append(tabFlow, types.PanelDiff)
 	}
 
+	// Build worktree paths and names
+	wtPaths := make([]string, len(m.worktrees))
+	wtNames := make([]string, len(m.worktrees))
+	for i, wt := range m.worktrees {
+		wtPaths[i] = wt.Path
+		wtNames[i] = filepath.Base(wt.Path)
+	}
+	currentWT := ""
+	if root, err := git.RepoRoot(); err == nil {
+		currentWT = root
+	}
+
 	ctx := controller.KeyContext{
-		CLCount:         len(m.clNames),
-		CLFileCount:     len(m.clFiles),
-		CLNames:         m.clNames,
-		CLFiles:         m.clFiles,
-		ShelfCount:      len(m.shelves),
-		ShelfFileCount:  len(m.shelfFiles),
-		SelectedCount:   len(m.state.SelectedFiles),
-		UnversionedName: changelist.UnversionedName,
-		DefaultName:     changelist.DefaultName,
-		LastCommitMsg:   git.LastCommitMessage(),
-		Remotes:         git.Remotes(),
-		TabFlow:         tabFlow,
+		CLCount:             len(m.clNames),
+		CLFileCount:         len(m.clFiles),
+		CLNames:             m.clNames,
+		CLFiles:             m.clFiles,
+		ShelfCount:          len(m.shelves),
+		ShelfFileCount:      len(m.shelfFiles),
+		SelectedCount:       len(m.state.SelectedFiles),
+		UnversionedName:     changelist.UnversionedName,
+		DefaultName:         changelist.DefaultName,
+		LastCommitMsg:       git.LastCommitMessage(),
+		Remotes:             git.Remotes(),
+		TabFlow:             tabFlow,
+		WorktreeCount:       len(m.worktrees),
+		WorktreePaths:       wtPaths,
+		WorktreeNames:       wtNames,
+		CurrentWorktreePath: currentWT,
 	}
 	// Build shelf names and dirs
 	ctx.ShelfNames = make([]string, len(m.shelves))
@@ -447,6 +477,8 @@ func (m *Model) scrollPanel(pid types.PanelID, delta int) {
 		m.state.DiffScroll = max(0, m.state.DiffScroll+delta)
 	case types.PanelLog:
 		m.state.LogScroll = max(0, m.state.LogScroll+delta)
+	case types.PanelWorktrees:
+		m.state.WorktreeSel = clamp(m.state.WorktreeSel+delta, 0, max(0, len(m.worktrees)-1))
 	}
 }
 
@@ -486,6 +518,14 @@ func (m *Model) clickItem(pid types.PanelID, row int) {
 			if idx >= 0 && idx < len(m.shelfFiles) {
 				m.state.ShelfFileSel = idx
 			}
+		}
+	case types.PanelWorktrees:
+		region := m.panelRegions[pid]
+		maxLines := region.H - 2
+		start, _ := visibleRange(m.state.WorktreeSel, len(m.worktrees), maxLines, 1)
+		idx := start + row
+		if idx >= 0 && idx < len(m.worktrees) {
+			m.state.WorktreeSel = idx
 		}
 	}
 }
@@ -553,6 +593,28 @@ func (m *Model) handlePromptResult(result *prompt.Result) bool {
 		m.refresh()
 		return false
 
+	case types.PromptPasteChangelist:
+		if m.state.ClipboardCL == nil {
+			m.SetError("Nothing in clipboard")
+			return false
+		}
+		ctx.SourceWorktreePath = m.state.ClipboardCL.SourceWorktree
+		ctx.ClipboardCLName = m.state.ClipboardCL.Name
+		ctx.ClipboardFiles = m.state.ClipboardCL.Files
+
+		if result.Value == types.PasteFullContent {
+			// Full content requires confirmation
+			m.pendingResult = result
+			m.pendingCtx = ctx
+			m.prompt.StartConfirm(types.ConfirmPasteFullContent,
+				fmt.Sprintf("%d", len(ctx.ClipboardFiles)))
+			return true
+		}
+		// Apply diff and Only changelist execute directly
+		action.Execute(result, &m.stores, m, ctx)
+		m.refresh()
+		return false
+
 	case types.PromptConfirm:
 		if result.Confirmed {
 			switch result.ConfirmAction {
@@ -564,6 +626,11 @@ func (m *Model) handlePromptResult(result *prompt.Result) bool {
 			case types.ConfirmUnshelve:
 				if m.pendingResult != nil {
 					m.pendingCtx.ForceUnshelve = true
+					action.Execute(m.pendingResult, &m.stores, m, m.pendingCtx)
+					m.refresh()
+				}
+			case types.ConfirmPasteFullContent:
+				if m.pendingResult != nil {
 					action.Execute(m.pendingResult, &m.stores, m, m.pendingCtx)
 					m.refresh()
 				}

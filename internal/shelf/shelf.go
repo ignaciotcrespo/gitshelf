@@ -20,6 +20,7 @@ type Metadata struct {
 	Commit    string   `json:"commit"`
 	CreatedAt string   `json:"createdAt"`
 	Files     []string `json:"files"`
+	Worktree  string   `json:"worktree,omitempty"`
 }
 
 // Shelf represents a saved shelf with its metadata.
@@ -78,6 +79,7 @@ func (s *Store) Create(name string, files []string, restore bool) error {
 		Commit:    git.HeadCommit(),
 		CreatedAt: time.Now().Format(time.RFC3339Nano),
 		Files:     files,
+		Worktree:  git.WorktreeName(),
 	}
 	metaData, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {

@@ -63,8 +63,10 @@ func setupActionRepo(t *testing.T) (dir string, stores *Stores) {
 	if err := os.Chdir(dir); err != nil {
 		t.Fatal(err)
 	}
+	git.SetRepoRoot(dir)
 	git.ClearLog()
 	t.Cleanup(func() {
+		git.SetRepoRoot("")
 		os.Chdir(origDir)
 	})
 
@@ -448,6 +450,125 @@ func TestExecuteMoveFile(t *testing.T) {
 	}
 	if !found {
 		t.Error("file not moved to new changelist")
+	}
+}
+
+func TestExecutePasteOnlyCL(t *testing.T) {
+	_, stores := setupActionRepo(t)
+	log := &testLogger{}
+
+	// Add another CL with a file that will be reassigned
+	changelist.AddChangelist(stores.State, "Other CL")
+	changelist.AssignFile(stores.State, "initial.txt", "Other CL")
+
+	result := &prompt.Result{
+		Mode:  types.PromptPasteChangelist,
+		Value: types.PasteOnlyCL,
+	}
+	ctx := &ActionContext{
+		ClipboardCLName: "Pasted CL",
+		ClipboardFiles:  []string{"initial.txt"},
+	}
+
+	modified := Execute(result, stores, log, ctx)
+	if !modified {
+		t.Error("Execute(paste only CL) should return true")
+	}
+	if !strings.Contains(log.status, "Pasted") {
+		t.Errorf("status = %q, expected to contain 'Pasted'", log.status)
+	}
+
+	// initial.txt should be in "Pasted CL", not in "Other CL"
+	for _, cl := range stores.State.Changelists {
+		if cl.Name == "Other CL" {
+			for _, f := range cl.Files {
+				if f == "initial.txt" {
+					t.Error("initial.txt should have been removed from 'Other CL'")
+				}
+			}
+		}
+		if cl.Name == "Pasted CL" {
+			found := false
+			for _, f := range cl.Files {
+				if f == "initial.txt" {
+					found = true
+				}
+			}
+			if !found {
+				t.Error("initial.txt should be in 'Pasted CL'")
+			}
+		}
+	}
+}
+
+func TestExecutePasteFullContent(t *testing.T) {
+	dir, stores := setupActionRepo(t)
+	log := &testLogger{}
+
+	// Create a source worktree directory with a file
+	srcDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(srcDir, "sub"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "initial.txt"), []byte("from source\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := &prompt.Result{
+		Mode:  types.PromptPasteChangelist,
+		Value: types.PasteFullContent,
+	}
+	ctx := &ActionContext{
+		SourceWorktreePath: srcDir,
+		ClipboardCLName:    "Pasted CL",
+		ClipboardFiles:     []string{"initial.txt"},
+	}
+
+	modified := Execute(result, stores, log, ctx)
+	if !modified {
+		t.Error("Execute(paste full content) should return true")
+	}
+	if log.err != "" {
+		t.Errorf("unexpected error: %s", log.err)
+	}
+
+	// Verify file was copied
+	data, err := os.ReadFile(filepath.Join(dir, "initial.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "from source\n" {
+		t.Errorf("file content = %q, want %q", string(data), "from source\n")
+	}
+
+	// Verify CL was created
+	found := false
+	for _, cl := range stores.State.Changelists {
+		if cl.Name == "Pasted CL" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("changelist 'Pasted CL' not created")
+	}
+}
+
+func TestExecutePasteNilClipboard(t *testing.T) {
+	_, stores := setupActionRepo(t)
+	log := &testLogger{}
+
+	result := &prompt.Result{
+		Mode:  types.PromptPasteChangelist,
+		Value: types.PasteOnlyCL,
+	}
+	ctx := &ActionContext{}
+
+	modified := Execute(result, stores, log, ctx)
+	if modified {
+		t.Error("Execute(paste with empty clipboard) should return false")
+	}
+	if log.err == "" {
+		t.Error("expected error for empty clipboard")
 	}
 }
 

@@ -22,13 +22,25 @@ type State struct {
 	DiffWrap    bool
 	LogScroll   int
 
-	DiffState types.PanelState
-	LogState  types.PanelState
+	DiffState     types.PanelState
+	LogState      types.PanelState
+	WorktreeState      types.PanelState
+	WorktreeSel        int
+	ActiveWorktreePath string // worktree path whose .gitshelf/ is used (empty = current)
 
 	ShowHelp   bool
 	HelpScroll int
 
 	MoveFile string
+
+	ClipboardCL *ClipboardChangelist // copied CL for paste into another worktree
+}
+
+// ClipboardChangelist holds a changelist copied for pasting into another worktree.
+type ClipboardChangelist struct {
+	Name           string
+	Files          []string
+	SourceWorktree string // full path of the worktree where the CL was copied from
 }
 
 // NewState creates an initial state.
@@ -39,6 +51,7 @@ func NewState() State {
 		SelectedFiles: make(map[string]bool),
 		DiffState:     types.PanelNormal,
 		LogState:      types.PanelNormal,
+		WorktreeState: types.PanelHidden,
 	}
 }
 
@@ -72,6 +85,10 @@ type KeyContext struct {
 	DirtyFiles      map[string]bool
 	DirtyCLs        map[string]bool
 	TabFlow         []types.PanelID // panels for tab cycling
+	WorktreeCount       int
+	WorktreePaths       []string // full paths for each worktree
+	WorktreeNames       []string // basenames for each worktree (display)
+	CurrentWorktreePath string   // path of the worktree gitshelf was launched from
 }
 
 // KeyResult is the output of HandleKey.

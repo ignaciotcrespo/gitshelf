@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/ignaciotcrespo/gitshelf/internal/controller"
 	"github.com/ignaciotcrespo/gitshelf/internal/diff"
 	"github.com/ignaciotcrespo/gitshelf/internal/git"
+	"github.com/ignaciotcrespo/gitshelf/internal/shelf"
 	"github.com/ignaciotcrespo/gitshelf/internal/types"
 )
 
@@ -158,10 +160,39 @@ func (m *Model) loadDiff() {
 	m.diff = ""
 }
 
+func (m *Model) loadWorktrees() {
+	wts, err := git.WorktreeList()
+	if err != nil {
+		m.worktrees = nil
+		return
+	}
+	m.worktrees = wts
+	if m.state.WorktreeSel >= len(m.worktrees) {
+		m.state.WorktreeSel = max(0, len(m.worktrees)-1)
+	}
+}
+
 func (m *Model) refresh() {
+	// Switch stores if active worktree changed
+	m.syncStores()
 	m.loadChangelists()
 	m.loadShelves()
+	m.loadWorktrees()
 	m.ahead, m.behind = git.AheadBehind()
+}
+
+// syncStores switches the CL and Shelf stores and the git repo root to point
+// at the active worktree, or back to the original if no worktree is active.
+func (m *Model) syncStores() {
+	dir := m.gitshelfDir
+	repoDir := filepath.Dir(m.gitshelfDir)
+	if m.state.ActiveWorktreePath != "" {
+		dir = filepath.Join(m.state.ActiveWorktreePath, ".gitshelf")
+		repoDir = m.state.ActiveWorktreePath
+	}
+	m.stores.CL = changelist.NewStore(dir)
+	m.stores.Shelf = shelf.NewStore(dir)
+	git.SetRepoRoot(repoDir)
 }
 
 // applyRefresh performs data loading based on the refresh flag.

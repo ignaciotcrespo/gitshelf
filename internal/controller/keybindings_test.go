@@ -66,10 +66,19 @@ func TestKeyBindings_CLKeys(t *testing.T) {
 			DefaultName:     "Changes",
 			LastCommitMsg:   "last",
 			Remotes:         []string{"origin"},
-			DirtyFiles:      map[string]bool{"a.txt": true},
-			DirtyCLs:        map[string]bool{"Feature": true},
+			DirtyFiles:          map[string]bool{"a.txt": true},
+			DirtyCLs:            map[string]bool{"Feature": true},
+			WorktreeCount:       2,
+			WorktreePaths:       []string{"/repo", "/repo-wt"},
+			WorktreeNames:       []string{"repo", "repo-wt"},
+			CurrentWorktreePath: "/repo",
 		}
 		s.SelectedFiles = map[string]bool{"a.txt": true}
+		s.ClipboardCL = &ClipboardChangelist{
+			Name:           "Feature",
+			Files:          []string{"a.txt"},
+			SourceWorktree: "/repo",
+		}
 
 		r := HandleKey(b.Key, s, ctx)
 		// The key should produce some effect: prompt, status, setActive, copyPatch, quit, or state change

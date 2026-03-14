@@ -103,6 +103,18 @@ func HandleKey(key string, state State, ctx KeyContext) KeyResult {
 		r.Refresh = RefreshAll
 		return r
 
+	case "6":
+		focused := r.State.Focus == types.PanelWorktrees
+		newState, moveFocus := tui.CycleWorktreeState(r.State.WorktreeState, focused)
+		r.State.WorktreeState = newState
+		if moveFocus {
+			r.State.Focus = r.State.Pivot
+		} else if !focused && newState != types.PanelHidden {
+			r.State.Focus = types.PanelWorktrees
+		}
+		r.Refresh = RefreshAll
+		return r
+
 	// --- Navigation keys ---
 
 	case "up", "k":
@@ -136,7 +148,7 @@ func HandleKey(key string, state State, ctx KeyContext) KeyResult {
 		return r
 
 	case "enter":
-		r.Refresh = HandleEnter(&r.State)
+		r.Refresh = HandleEnter(&r.State, ctx)
 		return r
 	}
 
@@ -274,6 +286,36 @@ func handleChangelistKey(key string, r KeyResult, ctx KeyContext) KeyResult {
 					Confirm: types.ConfirmDeleteChangelist,
 					Target:  name,
 				}
+			}
+		}
+
+	case "W":
+		if r.State.Focus == types.PanelChangelists && ctx.CLCount > 0 {
+			name := ctx.CLNames[r.State.CLSelected]
+			if name != ctx.UnversionedName {
+				source := ctx.CurrentWorktreePath
+				if r.State.ActiveWorktreePath != "" {
+					source = r.State.ActiveWorktreePath
+				}
+				// Make a copy of the file list
+				files := make([]string, len(ctx.CLFiles))
+				copy(files, ctx.CLFiles)
+				r.State.ClipboardCL = &ClipboardChangelist{
+					Name:           name,
+					Files:          files,
+					SourceWorktree: source,
+				}
+				r.StatusMsg = fmt.Sprintf("Copied '%s' (%d files) to clipboard", name, len(files))
+			}
+		}
+
+	case "V":
+		if r.State.Focus == types.PanelChangelists && r.State.ClipboardCL != nil {
+			options := []string{types.PasteFullContent, types.PasteApplyDiff, types.PasteOnlyCL}
+			r.StartPrompt = &PromptReq{
+				Mode:         types.PromptPasteChangelist,
+				DefaultValue: types.PasteOnlyCL,
+				Options:      options,
 			}
 		}
 

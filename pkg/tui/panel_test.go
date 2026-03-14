@@ -105,3 +105,32 @@ func TestRegionContains(t *testing.T) {
 		})
 	}
 }
+
+func TestCycleWorktreeState(t *testing.T) {
+	tests := []struct {
+		name        string
+		current     PanelState
+		focused     bool
+		wantState   PanelState
+		wantMoveFoc bool
+	}{
+		{"normal_focused_to_minimized", PanelNormal, true, PanelMinimized, true},
+		{"minimized_focused_to_hidden", PanelMinimized, true, PanelHidden, true},
+		{"hidden_focused_to_normal", PanelHidden, true, PanelNormal, false},
+		{"normal_not_focused", PanelNormal, false, PanelNormal, false},
+		{"minimized_not_focused", PanelMinimized, false, PanelMinimized, false},
+		{"hidden_not_focused_to_normal", PanelHidden, false, PanelNormal, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotState, gotMove := CycleWorktreeState(tt.current, tt.focused)
+			if gotState != tt.wantState {
+				t.Errorf("state = %v, want %v", gotState, tt.wantState)
+			}
+			if gotMove != tt.wantMoveFoc {
+				t.Errorf("moveFocus = %v, want %v", gotMove, tt.wantMoveFoc)
+			}
+		})
+	}
+}

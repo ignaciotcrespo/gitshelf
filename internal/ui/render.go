@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -114,7 +115,11 @@ func (m Model) renderShelvesContent(maxLines int) panelContent {
 			branch = "unknown"
 		}
 		ts := formatShelfTime(s.Meta.CreatedAt)
-		b.WriteString("    " + statusBarStyle.Render(fmt.Sprintf("%s@%s %s", branch, s.Meta.Commit, ts)) + "\n")
+		shelfLine := fmt.Sprintf("%s@%s %s", branch, s.Meta.Commit, ts)
+		if s.Meta.Worktree != "" && s.Meta.Worktree != git.WorktreeName() {
+			shelfLine += fmt.Sprintf(" [%s]", s.Meta.Worktree)
+		}
+		b.WriteString("    " + statusBarStyle.Render(shelfLine) + "\n")
 	}
 	// For shelves, total lines = items * 2 (name + branch line)
 	return panelContent{
@@ -320,18 +325,70 @@ func renderDiffLine(line, prefix string) string {
 	}
 }
 
+func (m Model) renderWorktreesContent(maxLines int) panelContent {
+	if len(m.worktrees) == 0 {
+		return panelContent{content: normalItemStyle.Render("  (no worktrees)")}
+	}
+	total := len(m.worktrees)
+	focused := m.state.Focus == types.PanelWorktrees
+	baseStyle := normalItemStyle
+	if focused {
+		baseStyle = focusedItemStyle
+	}
+	var b strings.Builder
+	start, end := visibleRange(m.state.WorktreeSel, total, maxLines, 1)
+	for i := start; i < end; i++ {
+		wt := m.worktrees[i]
+		cursor := "  "
+		style := baseStyle
+		if i == m.state.WorktreeSel {
+			cursor = "▸ "
+			if focused {
+				style = selectedItemStyle
+			} else {
+				style = dimSelectedItemStyle
+			}
+		}
+		name := filepath.Base(wt.Path)
+		currentMark := ""
+		if wt.IsCurrent {
+			currentMark = activeMarkerStyle.Render(" ●")
+		}
+		activeMark := ""
+		if wt.Path == m.state.ActiveWorktreePath {
+			activeMark = activeMarkerStyle.Render(" ◆")
+		}
+		branchStr := statusBarStyle.Render(" " + wt.Branch)
+		b.WriteString(cursor + style.Render(name) + currentMark + activeMark + branchStr + "\n")
+	}
+	return panelContent{
+		content: b.String(),
+		scroll:  panel.ScrollInfo{TotalLines: total, VisibleLines: maxLines, ScrollPos: start},
+	}
+}
+
+func (m Model) renderMinimizedWorktreeBar(width int, currentWT string) string {
+	text := fmt.Sprintf("▸ 6 Worktrees (%s)", currentWT)
+	style := statusBarStyle
+	truncStyle := lipgloss.NewStyle().MaxWidth(width)
+	return truncStyle.Render(style.Render(text))
+}
+
 func (m Model) renderHelp() string {
 	if m.prompt.Active() {
 		return m.prompt.RenderHelp()
 	}
 
-	common := " · 1-5 panels · ? help · q quit"
+	common := " · 1-6 panels · ? help · q quit"
 	var hidden string
 	if m.state.DiffState == types.PanelHidden {
 		hidden += " · 4 show diff"
 	}
 	if m.state.LogState == types.PanelHidden {
 		hidden += " · 5 show log"
+	}
+	if m.state.WorktreeState == types.PanelHidden {
+		hidden += " · 6 show worktrees"
 	}
 
 	switch m.state.Focus {
@@ -356,6 +413,8 @@ func (m Model) renderHelp() string {
 		return helpStyle.Render(" ↑/↓ scroll · " + controller.FooterText(controller.DiffBindings, nil) + " · 4 maximize/hide" + hidden + common)
 	case types.PanelLog:
 		return helpStyle.Render(" ↑/↓ scroll · 5 maximize/hide" + hidden + common)
+	case types.PanelWorktrees:
+		return helpStyle.Render(" ↑/↓ scroll · 6 minimize/hide" + hidden + common)
 	}
 	return helpStyle.Render(hidden + common)
 }

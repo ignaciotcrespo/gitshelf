@@ -11,6 +11,7 @@ const (
 	PanelNormal    PanelState = 0
 	PanelMaximized PanelState = 1
 	PanelHidden    PanelState = 2
+	PanelMinimized PanelState = 3
 )
 
 // PromptMode identifies the current input prompt type.

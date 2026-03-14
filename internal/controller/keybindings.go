@@ -22,6 +22,7 @@ var NavBindings = []KeyBinding{
 	{Key: "3", Display: "3", Short: "files", Desc: "Focus Files panel"},
 	{Key: "4", Display: "4", Short: "diff", Desc: "Cycle Diff panel (normal → maximized → hidden)"},
 	{Key: "5", Display: "5", Short: "log", Desc: "Cycle Git Log panel (normal → maximized → hidden)"},
+	{Key: "6", Display: "6", Short: "worktrees", Desc: "Cycle Worktrees panel (normal → minimized → hidden)"},
 	{Key: "tab", Display: "tab / shift+tab", Short: "cycle", Desc: "Cycle between panels"},
 	{Key: "up", Display: "j / ↑", Short: "up", Desc: "Move cursor up"},
 	{Key: "down", Display: "k / ↓", Short: "down", Desc: "Move cursor down"},
@@ -42,6 +43,8 @@ var CLBindings = []KeyBinding{
 	{Key: "p", Display: "p", Short: "push", Desc: "Push to remote"},
 	{Key: "P", Display: "P", Short: "pull", Desc: "Pull from remote"},
 	{Key: "B", Display: "B", Short: "accept", Desc: "Accept dirty changes as new baseline"},
+	{Key: "W", Display: "W", Short: "copy", Desc: "Copy changelist to clipboard (for pasting in another worktree)"},
+	{Key: "V", Display: "V", Short: "paste", Desc: "Paste changelist from clipboard"},
 	{Key: "y", Display: "y", Short: "copy patch", Desc: "Copy changelist diff as patch to clipboard"},
 }
 
@@ -86,6 +89,11 @@ var DiffBindings = []KeyBinding{
 // LogBindings are keys available when the Log panel is focused.
 var LogBindings = []KeyBinding{
 	// Log panel only supports scroll (handled by navigation) and maximize/hide.
+}
+
+// WorktreeBindings are keys available when the Worktrees panel is focused.
+var WorktreeBindings = []KeyBinding{
+	// Worktrees panel is display-only for now.
 }
 
 // RemoteBindings are shown in the help screen as a separate section.

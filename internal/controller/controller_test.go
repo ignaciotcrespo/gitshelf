@@ -140,9 +140,11 @@ func TestMoveDown(t *testing.T) {
 }
 
 func TestHandleEnter(t *testing.T) {
+	ctx := KeyContext{}
+
 	t.Run("changelists to files", func(t *testing.T) {
 		s := State{Focus: types.PanelChangelists}
-		r := HandleEnter(&s)
+		r := HandleEnter(&s, ctx)
 		if s.Focus != types.PanelFiles {
 			t.Errorf("expected Files, got %d", s.Focus)
 		}
@@ -153,7 +155,7 @@ func TestHandleEnter(t *testing.T) {
 
 	t.Run("files to diff", func(t *testing.T) {
 		s := State{Focus: types.PanelFiles}
-		r := HandleEnter(&s)
+		r := HandleEnter(&s, ctx)
 		if s.Focus != types.PanelDiff {
 			t.Errorf("expected Diff, got %d", s.Focus)
 		}
@@ -164,12 +166,47 @@ func TestHandleEnter(t *testing.T) {
 
 	t.Run("diff does nothing", func(t *testing.T) {
 		s := State{Focus: types.PanelDiff}
-		r := HandleEnter(&s)
+		r := HandleEnter(&s, ctx)
 		if s.Focus != types.PanelDiff {
 			t.Errorf("focus should not change")
 		}
 		if r != RefreshNone {
 			t.Errorf("expected RefreshNone")
+		}
+	})
+
+	t.Run("worktree select activates", func(t *testing.T) {
+		s := State{Focus: types.PanelWorktrees, WorktreeSel: 1, SelectedFiles: make(map[string]bool)}
+		wtCtx := KeyContext{
+			WorktreeCount:       2,
+			WorktreePaths:       []string{"/repo", "/repo-wt"},
+			CurrentWorktreePath: "/repo",
+		}
+		r := HandleEnter(&s, wtCtx)
+		if s.ActiveWorktreePath != "/repo-wt" {
+			t.Errorf("expected ActiveWorktreePath=/repo-wt, got %q", s.ActiveWorktreePath)
+		}
+		if r != RefreshAll {
+			t.Errorf("expected RefreshAll")
+		}
+		if s.CLSelected != 0 || s.ShelfSel != 0 {
+			t.Error("expected selection indices to reset")
+		}
+	})
+
+	t.Run("worktree select current toggles off", func(t *testing.T) {
+		s := State{Focus: types.PanelWorktrees, WorktreeSel: 0, ActiveWorktreePath: "/repo", SelectedFiles: make(map[string]bool)}
+		wtCtx := KeyContext{
+			WorktreeCount:       2,
+			WorktreePaths:       []string{"/repo", "/repo-wt"},
+			CurrentWorktreePath: "/repo",
+		}
+		r := HandleEnter(&s, wtCtx)
+		if s.ActiveWorktreePath != "" {
+			t.Errorf("expected empty ActiveWorktreePath, got %q", s.ActiveWorktreePath)
+		}
+		if r != RefreshAll {
+			t.Errorf("expected RefreshAll")
 		}
 	})
 }
@@ -1219,6 +1256,103 @@ func TestHandleKey_CopyPatch(t *testing.T) {
 		r := HandleKey("y", s, ctx)
 		if r.CopyPatch.Source != CopyPatchNone {
 			t.Errorf("expected CopyPatchNone in help mode, got %d", r.CopyPatch.Source)
+		}
+	})
+}
+
+// --- HandleKey "6": Worktree panel cycling ---
+
+func TestHandleKey_6(t *testing.T) {
+	t.Run("not focused, hidden to normal + focus", func(t *testing.T) {
+		s := NewState()
+		s.WorktreeState = types.PanelHidden
+		s.Focus = types.PanelChangelists
+		kr := HandleKey("6", s, KeyContext{})
+		if kr.State.WorktreeState != types.PanelNormal {
+			t.Errorf("expected Normal, got %d", kr.State.WorktreeState)
+		}
+		if kr.State.Focus != types.PanelWorktrees {
+			t.Errorf("expected focus on Worktrees, got %d", kr.State.Focus)
+		}
+	})
+
+	t.Run("focused, normal to minimized + focus to pivot", func(t *testing.T) {
+		s := NewState()
+		s.WorktreeState = types.PanelNormal
+		s.Focus = types.PanelWorktrees
+		kr := HandleKey("6", s, KeyContext{})
+		if kr.State.WorktreeState != types.PanelMinimized {
+			t.Errorf("expected Minimized, got %d", kr.State.WorktreeState)
+		}
+		if kr.State.Focus != kr.State.Pivot {
+			t.Errorf("expected focus on pivot, got %d", kr.State.Focus)
+		}
+	})
+
+	t.Run("focused, minimized to hidden + focus to pivot", func(t *testing.T) {
+		s := NewState()
+		s.WorktreeState = types.PanelMinimized
+		s.Focus = types.PanelWorktrees
+		kr := HandleKey("6", s, KeyContext{})
+		if kr.State.WorktreeState != types.PanelHidden {
+			t.Errorf("expected Hidden, got %d", kr.State.WorktreeState)
+		}
+		if kr.State.Focus != kr.State.Pivot {
+			t.Errorf("expected focus on pivot, got %d", kr.State.Focus)
+		}
+	})
+
+	t.Run("not focused, normal stays", func(t *testing.T) {
+		s := NewState()
+		s.WorktreeState = types.PanelNormal
+		s.Focus = types.PanelChangelists
+		kr := HandleKey("6", s, KeyContext{})
+		if kr.State.WorktreeState != types.PanelNormal {
+			t.Errorf("expected Normal unchanged, got %d", kr.State.WorktreeState)
+		}
+		// Should focus the worktrees panel
+		if kr.State.Focus != types.PanelWorktrees {
+			t.Errorf("expected focus on Worktrees, got %d", kr.State.Focus)
+		}
+	})
+}
+
+// --- Worktree Navigation ---
+
+func TestWorktreeNavigation(t *testing.T) {
+	t.Run("MoveDown", func(t *testing.T) {
+		s := State{Focus: types.PanelWorktrees, WorktreeSel: 0}
+		ctx := KeyContext{WorktreeCount: 3}
+		MoveDown(&s, ctx)
+		if s.WorktreeSel != 1 {
+			t.Errorf("expected 1, got %d", s.WorktreeSel)
+		}
+	})
+
+	t.Run("MoveDown at bottom", func(t *testing.T) {
+		s := State{Focus: types.PanelWorktrees, WorktreeSel: 2}
+		ctx := KeyContext{WorktreeCount: 3}
+		MoveDown(&s, ctx)
+		if s.WorktreeSel != 2 {
+			t.Errorf("expected 2, got %d", s.WorktreeSel)
+		}
+	})
+
+	t.Run("MoveUp", func(t *testing.T) {
+		s := State{Focus: types.PanelWorktrees, WorktreeSel: 1}
+		ctx := KeyContext{WorktreeCount: 3}
+		MoveUp(&s, ctx)
+		if s.WorktreeSel != 0 {
+			t.Errorf("expected 0, got %d", s.WorktreeSel)
+		}
+	})
+
+	t.Run("MoveUp at top", func(t *testing.T) {
+		s := State{Focus: types.PanelWorktrees, WorktreeSel: 0}
+		ctx := KeyContext{WorktreeCount: 3}
+		MoveUp(&s, ctx)
+		if s.WorktreeSel != 0 {
+			t.Errorf("expected 0, got %d", s.WorktreeSel)
 		}
 	})
 }
