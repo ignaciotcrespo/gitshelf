@@ -15,6 +15,7 @@ const (
 	PanelFiles
 	PanelDiff
 	PanelLog
+	PanelWorktrees
 )
 
 // PanelState represents the display state of a toggleable panel.
@@ -24,6 +25,7 @@ const (
 	PanelNormal    = tui.PanelNormal
 	PanelMaximized = tui.PanelMaximized
 	PanelHidden    = tui.PanelHidden
+	PanelMinimized = tui.PanelMinimized
 )
 
 // PromptMode identifies the current input prompt type.
@@ -42,6 +44,14 @@ const (
 	PromptPush
 	PromptPull
 	PromptConfirm
+	PromptPasteChangelist
+)
+
+// Paste mode options for copy-to-worktree clipboard.
+const (
+	PasteFullContent = "Full content"
+	PasteApplyDiff   = "Apply diff"
+	PasteOnlyCL      = "Only changelist"
 )
 
 // ConfirmAction identifies what dangerous action is pending confirmation.
@@ -54,4 +64,6 @@ const (
 	ConfirmAcceptDirty
 	ConfirmShelve
 	ConfirmUnshelve
+	ConfirmPasteFullContent
+	ConfirmSnapshotUnshelve
 )

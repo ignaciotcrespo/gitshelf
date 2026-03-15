@@ -75,9 +75,6 @@ func TestStoreLoadSave(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error: %v", err)
 	}
-	if state.Active != DefaultName {
-		t.Errorf("default Active = %q, want %q", state.Active, DefaultName)
-	}
 	if len(state.Changelists) != 1 {
 		t.Fatalf("default changelists len = %d, want 1", len(state.Changelists))
 	}
@@ -137,15 +134,10 @@ func TestRemoveChangelist(t *testing.T) {
 	if len(state.Changelists) != 1 {
 		t.Fatalf("after remove, len = %d, want 1", len(state.Changelists))
 	}
-	// Active should reset to DefaultName
-	if state.Active != DefaultName {
-		t.Errorf("after removing active, Active = %q, want %q", state.Active, DefaultName)
-	}
 }
 
 func TestRemoveChangelist_CannotRemoveDefault(t *testing.T) {
 	state := &State{
-		Active: DefaultName,
 		Changelists: []Changelist{
 			{Name: DefaultName},
 			{Name: "Other"},
@@ -160,7 +152,6 @@ func TestRemoveChangelist_CannotRemoveDefault(t *testing.T) {
 
 func TestRenameChangelist(t *testing.T) {
 	state := &State{
-		Active: "Old Name",
 		Changelists: []Changelist{
 			{Name: DefaultName},
 			{Name: "Old Name", Files: []string{"x.txt"}},
@@ -170,9 +161,6 @@ func TestRenameChangelist(t *testing.T) {
 	RenameChangelist(state, "Old Name", "New Name")
 	if state.Changelists[1].Name != "New Name" {
 		t.Errorf("renamed changelist = %q, want %q", state.Changelists[1].Name, "New Name")
-	}
-	if state.Active != "New Name" {
-		t.Errorf("active after rename = %q, want %q", state.Active, "New Name")
 	}
 	// Files should be preserved
 	if len(state.Changelists[1].Files) != 1 || state.Changelists[1].Files[0] != "x.txt" {

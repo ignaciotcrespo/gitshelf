@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/ignaciotcrespo/gitshelf/internal/changelist"
 	"github.com/ignaciotcrespo/gitshelf/internal/controller"
 	"github.com/ignaciotcrespo/gitshelf/internal/git"
+	"github.com/ignaciotcrespo/gitshelf/internal/shelf"
 	"github.com/ignaciotcrespo/gitshelf/internal/types"
 	"github.com/ignaciotcrespo/gitshelf/internal/ui/panel"
 	"github.com/ignaciotcrespo/gitshelf/pkg/tui"
@@ -50,11 +52,6 @@ func (m Model) renderChangelistContent(maxLines int) panelContent {
 			}
 		}
 
-		activeStr := ""
-		if m.clState != nil && name == m.clState.Active {
-			activeStr = activeMarkerStyle.Render(" ●")
-		}
-
 		fileCount := 0
 		for _, cl := range m.clState.Changelists {
 			if cl.Name == name {
@@ -75,7 +72,7 @@ func (m Model) renderChangelistContent(maxLines int) panelContent {
 		if fileCount > 0 {
 			info = activeMarkerStyle.Render(infoStr)
 		}
-		b.WriteString(cursor + dirtyMark + nameStr + activeStr + info + "\n")
+		b.WriteString(cursor + dirtyMark + nameStr + info + "\n")
 	}
 	return panelContent{
 		content: b.String(),
@@ -93,6 +90,9 @@ func (m Model) renderShelvesContent(maxLines int) panelContent {
 	if focused {
 		baseStyle = focusedItemStyle
 	}
+	// Pre-compute snapshot connectors
+	connectors := snapshotConnectors(m.shelves)
+
 	var b strings.Builder
 	start, end := visibleRange(m.state.ShelfSel, total, maxLines, 2)
 	for i := start; i < end; i++ {
@@ -107,14 +107,24 @@ func (m Model) renderShelvesContent(maxLines int) panelContent {
 				style = dimSelectedItemStyle
 			}
 		}
+		connector := connectors[i]
 		info := statusBarStyle.Render(fmt.Sprintf(" (%d files)", len(s.Meta.Files)))
-		b.WriteString(cursor + style.Render(s.Meta.Name) + info + "\n")
+		b.WriteString(cursor + statusBarStyle.Render(connector) + style.Render(s.Meta.Name) + info + "\n")
 		branch := s.Meta.Branch
 		if branch == "" {
 			branch = "unknown"
 		}
 		ts := formatShelfTime(s.Meta.CreatedAt)
-		b.WriteString("    " + statusBarStyle.Render(fmt.Sprintf("%s@%s %s", branch, s.Meta.Commit, ts)) + "\n")
+		shelfLine := fmt.Sprintf("%s@%s %s", branch, s.Meta.Commit, ts)
+		if s.Meta.Worktree != "" && s.Meta.Worktree != git.WorktreeName() {
+			shelfLine += fmt.Sprintf(" [%s]", s.Meta.Worktree)
+		}
+		// Continuation line for snapshot group
+		contLine := "  "
+		if connector == "┌ " || connector == "├ " {
+			contLine = "│ "
+		}
+		b.WriteString("  " + statusBarStyle.Render(contLine) + statusBarStyle.Render(shelfLine) + "\n")
 	}
 	// For shelves, total lines = items * 2 (name + branch line)
 	return panelContent{
@@ -320,12 +330,61 @@ func renderDiffLine(line, prefix string) string {
 	}
 }
 
+func (m Model) renderWorktreesContent(maxLines int) panelContent {
+	if len(m.worktrees) == 0 {
+		return panelContent{content: normalItemStyle.Render("  (no worktrees)")}
+	}
+	total := len(m.worktrees)
+	focused := m.state.Focus == types.PanelWorktrees
+	baseStyle := normalItemStyle
+	if focused {
+		baseStyle = focusedItemStyle
+	}
+	var b strings.Builder
+	start, end := visibleRange(m.state.WorktreeSel, total, maxLines, 1)
+	for i := start; i < end; i++ {
+		wt := m.worktrees[i]
+		cursor := "  "
+		style := baseStyle
+		if i == m.state.WorktreeSel {
+			cursor = "▸ "
+			if focused {
+				style = selectedItemStyle
+			} else {
+				style = dimSelectedItemStyle
+			}
+		}
+		name := filepath.Base(wt.Path)
+		currentMark := ""
+		if wt.IsCurrent {
+			currentMark = activeMarkerStyle.Render(" ●")
+		}
+		activeMark := ""
+		if wt.Path == m.state.ActiveWorktreePath {
+			activeMark = activeMarkerStyle.Render(" ◆")
+		}
+		branchStr := statusBarStyle.Render(" " + wt.Branch)
+		b.WriteString(cursor + style.Render(name) + currentMark + activeMark + branchStr + "\n")
+	}
+	return panelContent{
+		content: b.String(),
+		scroll:  panel.ScrollInfo{TotalLines: total, VisibleLines: maxLines, ScrollPos: start},
+	}
+}
+
+func (m Model) renderMinimizedWorktreeBar(width int, currentWT string) string {
+	text := fmt.Sprintf("▸ 6 Worktrees (%s)", currentWT)
+	style := statusBarStyle
+	truncStyle := lipgloss.NewStyle().MaxWidth(width)
+	return truncStyle.Render(style.Render(text))
+}
+
 func (m Model) renderHelp() string {
 	if m.prompt.Active() {
 		return m.prompt.RenderHelp()
 	}
 
-	common := " · 1-5 panels · ? help · q quit"
+	common := " · 1-6 panels · ? help · q quit"
 	var hidden string
 	if m.state.DiffState == types.PanelHidden {
 		hidden += " · 4 show diff"
@@ -333,13 +392,16 @@ func (m Model) renderHelp() string {
 	if m.state.LogState == types.PanelHidden {
 		hidden += " · 5 show log"
 	}
-
 	switch m.state.Focus {
 	case types.PanelChangelists:
 		isDirty := len(m.clNames) > 0 && m.state.CLSelected < len(m.clNames) && m.dirtyCLs[m.clNames[m.state.CLSelected]]
 		return m.buildFooter(controller.CLBindings, isDirty, hidden+common)
 	case types.PanelShelves:
-		return helpStyle.Render(" " + controller.FooterText(controller.ShelfBindings, nil) + hidden + common)
+		exclude := map[string]bool{"U": true}
+		if m.isSelectedShelfSnapshot() {
+			exclude = nil
+		}
+		return helpStyle.Render(" " + controller.FooterText(controller.ShelfBindings, exclude) + hidden + common)
 	case types.PanelFiles:
 		if controller.IsChangelistContext(m.state) {
 			hasDirty := false
@@ -356,17 +418,20 @@ func (m Model) renderHelp() string {
 		return helpStyle.Render(" ↑/↓ scroll · " + controller.FooterText(controller.DiffBindings, nil) + " · 4 maximize/hide" + hidden + common)
 	case types.PanelLog:
 		return helpStyle.Render(" ↑/↓ scroll · 5 maximize/hide" + hidden + common)
+	case types.PanelWorktrees:
+		return helpStyle.Render(" ↑/↓ scroll · 6 minimize/hide" + hidden + common)
 	}
 	return helpStyle.Render(hidden + common)
 }
 
 // buildFooter renders a help footer with optional "B accept" in warning style.
+// When showDirtyWarning is false, "B accept" is hidden entirely.
 func (m Model) buildFooter(bindings []controller.KeyBinding, showDirtyWarning bool, suffix string) string {
 	if showDirtyWarning {
 		text := controller.FooterText(bindings, map[string]bool{"B": true})
 		return helpStyle.Render(" "+text+" · ") + warningStyle.Render("B accept") + helpStyle.Render(suffix)
 	}
-	return helpStyle.Render(" " + controller.FooterText(bindings, nil) + suffix)
+	return helpStyle.Render(" " + controller.FooterText(bindings, map[string]bool{"B": true}) + suffix)
 }
 
 func (m Model) renderHelpScreen() string {
@@ -488,6 +553,51 @@ func (m Model) renderLogPanel(maxHeight, maxWidth int) string {
 
 // formatShelfTime parses an RFC3339 timestamp and formats it in a short
 // locale-aware format with timezone. Detects MM/DD vs DD/MM from LC_TIME/LANG.
+// isSelectedShelfSnapshot returns true if the currently selected shelf belongs to a snapshot group.
+func (m Model) isSelectedShelfSnapshot() bool {
+	if m.state.ShelfSel < 0 || m.state.ShelfSel >= len(m.shelves) {
+		return false
+	}
+	return m.shelves[m.state.ShelfSel].Meta.Snapshot != ""
+}
+
+// snapshotConnectors computes box-drawing prefixes for snapshot groups.
+// Returns a string per shelf: "┌ ", "├ ", "└ " for group members, "" for standalone.
+func snapshotConnectors(shelves []shelf.Shelf) []string {
+	connectors := make([]string, len(shelves))
+
+	// Find first and last index for each snapshot ID
+	type span struct{ first, last int }
+	groups := map[string]*span{}
+	for i, s := range shelves {
+		id := s.Meta.Snapshot
+		if id == "" {
+			continue
+		}
+		if g, ok := groups[id]; ok {
+			g.last = i
+		} else {
+			groups[id] = &span{first: i, last: i}
+		}
+	}
+
+	for _, g := range groups {
+		if g.first == g.last {
+			// Single shelf remaining — no connectors
+			continue
+		}
+		connectors[g.first] = "┌ "
+		for i := g.first + 1; i < g.last; i++ {
+			if shelves[i].Meta.Snapshot == shelves[g.first].Meta.Snapshot {
+				connectors[i] = "├ "
+			}
+		}
+		connectors[g.last] = "└ "
+	}
+
+	return connectors
+}
+
 func formatShelfTime(rfc3339 string) string {
 	t, err := time.Parse(time.RFC3339, rfc3339)
 	if err != nil {

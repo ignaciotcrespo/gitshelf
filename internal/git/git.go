@@ -469,6 +469,80 @@ func FileDiffHashes() map[string]string {
 	return result
 }
 
+// Worktree represents a git worktree entry.
+type Worktree struct {
+	Path      string
+	Branch    string
+	Commit    string
+	IsCurrent bool
+}
+
+// WorktreeList returns all worktrees for the current repository.
+// launchPath is the worktree where gitshelf was launched; it determines IsCurrent.
+// If empty, falls back to RepoRoot().
+func WorktreeList(launchPath string) ([]Worktree, error) {
+	out, err := query("worktree", "list", "--porcelain")
+	if err != nil {
+		return nil, err
+	}
+	if out == "" {
+		return nil, nil
+	}
+
+	root := launchPath
+	if root == "" {
+		root, _ = RepoRoot()
+	}
+
+	var worktrees []Worktree
+	var current Worktree
+	for _, line := range strings.Split(out, "\n") {
+		switch {
+		case strings.HasPrefix(line, "worktree "):
+			if current.Path != "" {
+				worktrees = append(worktrees, current)
+			}
+			current = Worktree{Path: filepath.Clean(strings.TrimPrefix(line, "worktree "))}
+		case strings.HasPrefix(line, "HEAD "):
+			commit := strings.TrimPrefix(line, "HEAD ")
+			if len(commit) > 7 {
+				commit = commit[:7]
+			}
+			current.Commit = commit
+		case strings.HasPrefix(line, "branch "):
+			branch := strings.TrimPrefix(line, "branch ")
+			branch = strings.TrimPrefix(branch, "refs/heads/")
+			current.Branch = branch
+		case line == "bare":
+			current.Branch = "(bare)"
+		case line == "detached":
+			current.Branch = "(detached)"
+		}
+	}
+	if current.Path != "" {
+		worktrees = append(worktrees, current)
+	}
+
+	// Mark current worktree
+	for i := range worktrees {
+		if worktrees[i].Path == root {
+			worktrees[i].IsCurrent = true
+		}
+	}
+
+	return worktrees, nil
+}
+
+// WorktreeName returns the basename of the current worktree directory.
+// For the main worktree this is the repo folder name; for linked worktrees it's the worktree folder name.
+func WorktreeName() string {
+	root, err := RepoRoot()
+	if err != nil {
+		return ""
+	}
+	return filepath.Base(root)
+}
+
 // ChangedFileSet returns the set of all currently changed files (tracked + untracked).
 func ChangedFileSet() map[string]bool {
 	tracked, _ := TrackedChangedFiles()
@@ -481,6 +555,50 @@ func ChangedFileSet() map[string]bool {
 		set[f] = true
 	}
 	return set
+}
+
+// DiffFilesIn generates a unified diff for the given files in a specific directory.
+func DiffFilesIn(dir string, files ...string) (string, error) {
+	args := []string{"diff", "--"}
+	args = append(args, files...)
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	stdout := strings.TrimSpace(string(out))
+	if err != nil {
+		stderrStr := strings.TrimSpace(stderr.String())
+		if stderrStr != "" {
+			return "", fmt.Errorf("%s", stderrStr)
+		}
+		return "", err
+	}
+	addLog(args, stdout, "")
+	return stdout, nil
+}
+
+// ApplyPatchFromString applies a unified diff patch string to the current working tree.
+func ApplyPatchFromString(patch string) error {
+	root, err := RepoRoot()
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command("git", "apply", "--whitespace=nowarn", "-")
+	cmd.Dir = root
+	cmd.Stdin = strings.NewReader(patch)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		stderrStr := strings.TrimSpace(stderr.String())
+		addLog([]string{"apply"}, "", stderrStr)
+		if stderrStr != "" {
+			return fmt.Errorf("%s", stderrStr)
+		}
+		return err
+	}
+	addLog([]string{"apply"}, "Patch applied", "")
+	return nil
 }
 
 // unquoteGitPath strips quotes that git adds around paths containing spaces or special chars.

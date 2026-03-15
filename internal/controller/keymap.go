@@ -103,6 +103,18 @@ func HandleKey(key string, state State, ctx KeyContext) KeyResult {
 		r.Refresh = RefreshAll
 		return r
 
+	case "6":
+		focused := r.State.Focus == types.PanelWorktrees
+		newState, moveFocus := tui.CycleWorktreeState(r.State.WorktreeState, focused)
+		r.State.WorktreeState = newState
+		if moveFocus {
+			r.State.Focus = r.State.Pivot
+		} else if !focused {
+			r.State.Focus = types.PanelWorktrees
+		}
+		r.Refresh = RefreshAll
+		return r
+
 	// --- Navigation keys ---
 
 	case "up", "k":
@@ -136,7 +148,7 @@ func HandleKey(key string, state State, ctx KeyContext) KeyResult {
 		return r
 
 	case "enter":
-		r.Refresh = HandleEnter(&r.State)
+		r.Refresh = HandleEnter(&r.State, ctx)
 		return r
 	}
 
@@ -210,12 +222,6 @@ func handleChangelistKey(key string, r KeyResult, ctx KeyContext) KeyResult {
 			for _, f := range ctx.CLFiles {
 				r.State.SelectedFiles[f] = true
 			}
-		} else if r.State.Focus == types.PanelChangelists && ctx.CLCount > 0 {
-			name := ctx.CLNames[r.State.CLSelected]
-			if name != ctx.UnversionedName {
-				r.SetActive = name
-				r.StatusMsg = fmt.Sprintf("Active: %s", name)
-			}
 		}
 		return r
 
@@ -277,11 +283,50 @@ func handleChangelistKey(key string, r KeyResult, ctx KeyContext) KeyResult {
 			}
 		}
 
+	case "W":
+		if r.State.Focus == types.PanelChangelists && ctx.CLCount > 0 {
+			name := ctx.CLNames[r.State.CLSelected]
+			if name != ctx.UnversionedName {
+				source := ctx.CurrentWorktreePath
+				if r.State.ActiveWorktreePath != "" {
+					source = r.State.ActiveWorktreePath
+				}
+				// Make a copy of the file list
+				files := make([]string, len(ctx.CLFiles))
+				copy(files, ctx.CLFiles)
+				r.State.ClipboardCL = &ClipboardChangelist{
+					Name:           name,
+					Files:          files,
+					SourceWorktree: source,
+				}
+				r.StatusMsg = fmt.Sprintf("Copied '%s' (%d files) to clipboard", name, len(files))
+			}
+		}
+
+	case "V":
+		if r.State.Focus == types.PanelChangelists && r.State.ClipboardCL != nil {
+			options := []string{types.PasteFullContent, types.PasteApplyDiff, types.PasteOnlyCL}
+			r.StartPrompt = &PromptReq{
+				Mode:         types.PromptPasteChangelist,
+				DefaultValue: types.PasteOnlyCL,
+				Options:      options,
+			}
+		}
+
+	case "S":
+		if r.State.Focus == types.PanelChangelists && ctx.CLCount > 0 {
+			r.RunSnapshotShelve = true
+		}
+
 	case "p":
-		r.StartPrompt, r.RunRemote = buildRemoteAction(types.PromptPush, ctx.Remotes)
+		if r.State.Focus == types.PanelChangelists {
+			r.StartPrompt, r.RunRemote = buildRemoteAction(types.PromptPush, ctx.Remotes)
+		}
 
 	case "P":
-		r.StartPrompt, r.RunRemote = buildRemoteAction(types.PromptPull, ctx.Remotes)
+		if r.State.Focus == types.PanelChangelists {
+			r.StartPrompt, r.RunRemote = buildRemoteAction(types.PromptPull, ctx.Remotes)
+		}
 
 	case "B":
 		if r.State.Focus == types.PanelChangelists && ctx.CLCount > 0 {
@@ -354,7 +399,7 @@ func handleShelfKey(key string, r KeyResult, ctx KeyContext) KeyResult {
 		if ctx.ShelfCount > 0 {
 			r.StartPrompt = &PromptReq{
 				Mode:         types.PromptUnshelve,
-				DefaultValue: ctx.ActiveCL,
+				DefaultValue: ctx.DefaultName,
 				Target:       ctx.ShelfNames[r.State.ShelfSel],
 				Options:      ctx.CLNames,
 			}
@@ -374,6 +419,18 @@ func handleShelfKey(key string, r KeyResult, ctx KeyContext) KeyResult {
 			r.StartPrompt = &PromptReq{
 				Mode:         types.PromptRenameShelf,
 				DefaultValue: ctx.ShelfNames[r.State.ShelfSel],
+			}
+		}
+
+	case "U":
+		if ctx.ShelfCount > 0 && r.State.ShelfSel < len(ctx.ShelfSnapshots) {
+			snapshotID := ctx.ShelfSnapshots[r.State.ShelfSel]
+			if snapshotID != "" {
+				r.StartPrompt = &PromptReq{
+					Mode:    types.PromptConfirm,
+					Confirm: types.ConfirmSnapshotUnshelve,
+					Target:  snapshotID,
+				}
 			}
 		}
 	}

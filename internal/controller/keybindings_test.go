@@ -66,18 +66,27 @@ func TestKeyBindings_CLKeys(t *testing.T) {
 			DefaultName:     "Changes",
 			LastCommitMsg:   "last",
 			Remotes:         []string{"origin"},
-			DirtyFiles:      map[string]bool{"a.txt": true},
-			DirtyCLs:        map[string]bool{"Feature": true},
+			DirtyFiles:          map[string]bool{"a.txt": true},
+			DirtyCLs:            map[string]bool{"Feature": true},
+			WorktreeCount:       2,
+			WorktreePaths:       []string{"/repo", "/repo-wt"},
+			WorktreeNames:       []string{"repo", "repo-wt"},
+			CurrentWorktreePath: "/repo",
 		}
 		s.SelectedFiles = map[string]bool{"a.txt": true}
+		s.ClipboardCL = &ClipboardChangelist{
+			Name:           "Feature",
+			Files:          []string{"a.txt"},
+			SourceWorktree: "/repo",
+		}
 
 		r := HandleKey(b.Key, s, ctx)
-		// The key should produce some effect: prompt, status, setActive, copyPatch, quit, or state change
+		// The key should produce some effect: prompt, status, copyPatch, quit, or state change
 		hasEffect := r.StartPrompt != nil ||
 			r.RunRemote != nil ||
+			r.RunSnapshotShelve ||
 			r.StatusMsg != "" ||
 			r.ErrorMsg != "" ||
-			r.SetActive != "" ||
 			r.CopyPatch.Source != CopyPatchNone ||
 			r.Quit ||
 			r.Refresh != RefreshNone
@@ -94,10 +103,11 @@ func TestKeyBindings_ShelfKeys(t *testing.T) {
 		s.Focus = types.PanelShelves
 		s.Pivot = types.PanelShelves
 		ctx := KeyContext{
-			ShelfCount: 1,
-			ShelfNames: []string{"my-shelf"},
-			CLNames:    []string{"Changes"},
-			CLCount:    1,
+			ShelfCount:     1,
+			ShelfNames:     []string{"my-shelf"},
+			ShelfSnapshots: []string{"snap-1"},
+			CLNames:        []string{"Changes"},
+			CLCount:        1,
 		}
 
 		r := HandleKey(b.Key, s, ctx)

@@ -1,6 +1,7 @@
 package shelf
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -52,8 +53,10 @@ func setupShelfRepo(t *testing.T) (repoDir string, store *Store) {
 	if err := os.Chdir(dir); err != nil {
 		t.Fatal(err)
 	}
+	git.SetRepoRoot(dir)
 	git.ClearLog()
 	t.Cleanup(func() {
+		git.SetRepoRoot("")
 		os.Chdir(origDir)
 	})
 
@@ -682,6 +685,44 @@ func TestGetMetadataInvalidJSON(t *testing.T) {
 	_, err := store.GetMetadata("bad-meta")
 	if err == nil {
 		t.Error("GetMetadata() with invalid JSON should return error")
+	}
+}
+
+func TestShelfMetadataWorktree(t *testing.T) {
+	dir, store := setupShelfRepo(t)
+
+	// Modify file and create shelf
+	if err := os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("wt-test\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Create("wt-shelf", []string{"file1.txt"}, false); err != nil {
+		t.Fatalf("Create() error: %v", err)
+	}
+
+	shelves, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(shelves) != 1 {
+		t.Fatalf("expected 1 shelf, got %d", len(shelves))
+	}
+
+	// Worktree field should be populated with the basename of the repo dir
+	if shelves[0].Meta.Worktree == "" {
+		t.Error("Worktree field should be populated")
+	}
+	if shelves[0].Meta.Worktree != filepath.Base(dir) {
+		t.Errorf("Worktree = %q, want %q", shelves[0].Meta.Worktree, filepath.Base(dir))
+	}
+
+	// Test backward compat: old JSON without worktree field should deserialize fine
+	oldJSON := `{"name":"old-shelf","branch":"main","commit":"abc1234","createdAt":"2024-01-01T00:00:00Z","files":["a.txt"]}`
+	var meta Metadata
+	if err := json.Unmarshal([]byte(oldJSON), &meta); err != nil {
+		t.Fatalf("Unmarshal old JSON: %v", err)
+	}
+	if meta.Worktree != "" {
+		t.Errorf("old shelf Worktree = %q, want empty", meta.Worktree)
 	}
 }
 

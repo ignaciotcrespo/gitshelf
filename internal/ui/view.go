@@ -74,10 +74,23 @@ func (m Model) View() string {
 		rightW = m.width - leftW - middleW - 6
 	}
 
-	// Left column: two stacked panels
-	leftInner := contentH - 2
-	clH := leftInner / 2
-	shH := leftInner - clH
+	// Left column: stacked panels (CL, Shelves, optionally Worktrees)
+	// Each panel.Box adds 2 lines (top+bottom border), so subtract accordingly.
+	var clH, shH, wtH int
+	switch m.state.WorktreeState {
+	case types.PanelNormal:
+		// 3 panels × 2 border lines = 6
+		leftInner := contentH - 4 // contentH+2 total - 6 borders
+		clH = leftInner / 3
+		shH = leftInner / 3
+		wtH = leftInner - clH - shH
+	default: // Minimized
+		// 2 panels × 2 border lines = 4, plus 1 minimized bar line
+		leftInner := contentH - 3 // contentH+2 total - 4 borders - 1 min bar
+		clH = leftInner / 2
+		shH = leftInner - clH
+		wtH = 1
+	}
 
 	// Changelists panel: in-context accent when CL context, gray when shelf context
 	clFocused := m.state.Focus == types.PanelChangelists
@@ -99,7 +112,18 @@ func (m Model) View() string {
 	}
 	shBox := panel.Box(2, "Shelves", shPC.content, leftW, shH, shFocused, shOpts)
 
-	leftColumn := lipgloss.JoinVertical(lipgloss.Left, clBox, shBox)
+	var leftColumn string
+	switch m.state.WorktreeState {
+	case types.PanelNormal:
+		wtFocused := m.state.Focus == types.PanelWorktrees
+		wtPC := m.renderWorktreesContent(wtH)
+		wtBox := panel.Box(6, "Worktrees", wtPC.content, leftW, wtH, wtFocused, panel.BoxOpts{Scroll: wtPC.scroll})
+		leftColumn = lipgloss.JoinVertical(lipgloss.Left, clBox, shBox, wtBox)
+	default: // Minimized
+		currentWT := git.WorktreeName()
+		minBar := m.renderMinimizedWorktreeBar(leftW+2, currentWT)
+		leftColumn = lipgloss.JoinVertical(lipgloss.Left, clBox, shBox, minBar)
+	}
 
 	// Files panel — always in context
 	filesFocused := m.state.Focus == types.PanelFiles
@@ -110,7 +134,11 @@ func (m Model) View() string {
 	} else {
 		filesPC = m.renderFilesContent(m.shelfFiles, m.state.ShelfFileSel, filesMaxLines)
 	}
-	middle := panel.Box(3, "Files", filesPC.content, middleW, contentH, filesFocused, panel.BoxOpts{Scroll: filesPC.scroll, Accent: panelAccent(filesFocused)})
+	filesTitle := "Files"
+	if !isCL {
+		filesTitle = "Shelved Files"
+	}
+	middle := panel.Box(3, filesTitle, filesPC.content, middleW, contentH, filesFocused, panel.BoxOpts{Scroll: filesPC.scroll, Accent: panelAccent(filesFocused)})
 
 	var topPanels string
 	if m.state.DiffState == types.PanelHidden {
@@ -128,6 +156,10 @@ func (m Model) View() string {
 	leftColW := leftW + 2
 	m.panelRegions[types.PanelChangelists] = panel.Region{X: 0, Y: 0, W: leftColW, H: clBoxH}
 	m.panelRegions[types.PanelShelves] = panel.Region{X: 0, Y: clBoxH, W: leftColW, H: shBoxH}
+	if m.state.WorktreeState == types.PanelNormal {
+		wtBoxH := wtH + 2
+		m.panelRegions[types.PanelWorktrees] = panel.Region{X: 0, Y: clBoxH + shBoxH, W: leftColW, H: wtBoxH}
+	}
 	middleX := leftColW
 	middleBoxW := middleW + 2
 	m.panelRegions[types.PanelFiles] = panel.Region{X: middleX, Y: 0, W: middleBoxW, H: contentH + 2}

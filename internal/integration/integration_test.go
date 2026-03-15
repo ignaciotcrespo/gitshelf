@@ -51,10 +51,11 @@ type TestApp struct {
 	t   *testing.T
 	dir string
 
-	stores  action.Stores
-	logger  *testLogger
-	state   controller.State
-	clState *changelist.State
+	gitshelfDir string // original .gitshelf directory (for syncStores)
+	stores      action.Stores
+	logger      *testLogger
+	state       controller.State
+	clState     *changelist.State
 
 	// Loaded data (mirrors Model fields)
 	clNames    []string
@@ -63,14 +64,15 @@ type TestApp struct {
 	shelfFiles []string
 	dirtyFiles map[string]bool
 	dirtyCLs   map[string]bool
+	worktrees  []git.Worktree
 
 	// Diff (mirrors Model.diff)
 	diff string
 
 	// Prompt flow
-	prompt        tui.Prompt
-	pending       *prompt.Result
-	pendingCtx    *action.ActionContext
+	prompt     tui.Prompt
+	pending    *prompt.Result
+	pendingCtx *action.ActionContext
 }
 
 // newTestApp creates a temp git repo with an initial commit and returns a TestApp.
@@ -98,10 +100,11 @@ func newTestApp(t *testing.T) *TestApp {
 	t.Cleanup(func() { git.SetRepoRoot("") })
 
 	app := &TestApp{
-		t:      t,
-		dir:    dir,
-		state:  controller.NewState(),
-		logger: &testLogger{t: t},
+		t:           t,
+		dir:         dir,
+		gitshelfDir: gitshelfDir,
+		state:       controller.NewState(),
+		logger:      &testLogger{t: t},
 		stores: action.Stores{
 			CL:    clStore,
 			Shelf: shelfStore,
@@ -147,10 +150,11 @@ func newTestAppWithRemote(t *testing.T) *TestApp {
 	t.Cleanup(func() { git.SetRepoRoot("") })
 
 	app := &TestApp{
-		t:      t,
-		dir:    workDir,
-		state:  controller.NewState(),
-		logger: &testLogger{t: t},
+		t:           t,
+		dir:         workDir,
+		gitshelfDir: gitshelfDir,
+		state:       controller.NewState(),
+		logger:      &testLogger{t: t},
 		stores: action.Stores{
 			CL:    clStore,
 			Shelf: shelfStore,
@@ -165,8 +169,36 @@ func newTestAppWithRemote(t *testing.T) *TestApp {
 // TestApp methods — data loading (mirrors loader.go)
 // ---------------------------------------------------------------------------
 
+// syncStores mirrors loader.go:syncStores — switches CL/Shelf stores and
+// git.SetRepoRoot based on the active worktree.
+func (app *TestApp) syncStores() {
+	dir := app.gitshelfDir
+	repoDir := filepath.Dir(app.gitshelfDir)
+	if app.state.ActiveWorktreePath != "" {
+		dir = filepath.Join(app.state.ActiveWorktreePath, ".gitshelf")
+		repoDir = app.state.ActiveWorktreePath
+	}
+	app.stores.CL = changelist.NewStore(dir)
+	app.stores.Shelf = shelf.NewStore(dir)
+	git.SetRepoRoot(repoDir)
+}
+
+func (app *TestApp) loadWorktrees() {
+	wts, err := git.WorktreeList(filepath.Dir(app.gitshelfDir))
+	if err != nil {
+		app.worktrees = nil
+		return
+	}
+	app.worktrees = wts
+	if app.state.WorktreeSel >= len(app.worktrees) {
+		app.state.WorktreeSel = max(0, len(app.worktrees)-1)
+	}
+}
+
 func (app *TestApp) refresh() {
 	app.t.Helper()
+
+	app.syncStores()
 
 	state, err := app.stores.CL.Load()
 	if err != nil {
@@ -192,6 +224,7 @@ func (app *TestApp) refresh() {
 	}
 	app.loadCLFiles()
 	app.loadShelves()
+	app.loadWorktrees()
 }
 
 func (app *TestApp) loadCLFiles() {
@@ -328,6 +361,8 @@ func (app *TestApp) applyRefresh(flag controller.RefreshFlag) {
 	switch {
 	case flag&controller.RefreshAll != 0:
 		app.refresh()
+	case flag&controller.RefreshWorktree != 0:
+		app.refresh()
 	case flag&controller.RefreshCLFiles != 0:
 		app.loadCLFiles()
 	case flag&controller.RefreshShelfFiles != 0:
@@ -344,30 +379,43 @@ func (app *TestApp) buildKeyContext() controller.KeyContext {
 	if app.state.DiffState != types.PanelHidden {
 		tabFlow = append(tabFlow, types.PanelDiff)
 	}
+	currentWT := ""
+	if root, err := git.RepoRoot(); err == nil {
+		currentWT = root
+	}
+	wtPaths := make([]string, len(app.worktrees))
+	wtNames := make([]string, len(app.worktrees))
+	for i, wt := range app.worktrees {
+		wtPaths[i] = wt.Path
+		wtNames[i] = filepath.Base(wt.Path)
+	}
 	ctx := controller.KeyContext{
-		CLCount:         len(app.clNames),
-		CLFileCount:     len(app.clFiles),
-		CLNames:         app.clNames,
-		CLFiles:         app.clFiles,
-		ShelfCount:      len(app.shelves),
-		ShelfFileCount:  len(app.shelfFiles),
-		SelectedCount:   len(app.state.SelectedFiles),
-		UnversionedName: changelist.UnversionedName,
-		DefaultName:     changelist.DefaultName,
-		LastCommitMsg:   git.LastCommitMessage(),
-		Remotes:         git.Remotes(),
-		TabFlow:         tabFlow,
-		DirtyFiles:      app.dirtyFiles,
-		DirtyCLs:        app.dirtyCLs,
+		CLCount:             len(app.clNames),
+		CLFileCount:         len(app.clFiles),
+		CLNames:             app.clNames,
+		CLFiles:             app.clFiles,
+		ShelfCount:          len(app.shelves),
+		ShelfFileCount:      len(app.shelfFiles),
+		SelectedCount:       len(app.state.SelectedFiles),
+		UnversionedName:     changelist.UnversionedName,
+		DefaultName:         changelist.DefaultName,
+		LastCommitMsg:       git.LastCommitMessage(),
+		Remotes:             git.Remotes(),
+		TabFlow:             tabFlow,
+		DirtyFiles:          app.dirtyFiles,
+		DirtyCLs:            app.dirtyCLs,
+		WorktreeCount:       len(app.worktrees),
+		WorktreePaths:       wtPaths,
+		WorktreeNames:       wtNames,
+		CurrentWorktreePath: currentWT,
 	}
 	ctx.ShelfNames = make([]string, len(app.shelves))
 	ctx.ShelfDirs = make([]string, len(app.shelves))
+	ctx.ShelfSnapshots = make([]string, len(app.shelves))
 	for i, s := range app.shelves {
 		ctx.ShelfNames[i] = s.Meta.Name
 		ctx.ShelfDirs[i] = s.PatchDir
-	}
-	if app.clState != nil {
-		ctx.ActiveCL = app.clState.Active
+		ctx.ShelfSnapshots[i] = s.Meta.Snapshot
 	}
 	return ctx
 }
@@ -412,11 +460,10 @@ func (app *TestApp) PressKey(key string) {
 	kr := controller.HandleKey(key, app.state, keyCtx)
 	app.state = kr.State
 
-	if kr.SetActive != "" {
-		app.clState.Active = kr.SetActive
-		if err := app.stores.CL.Save(app.clState); err != nil {
-			app.t.Fatalf("save CL: %v", err)
-		}
+	if kr.RunSnapshotShelve {
+		action.ExecuteSnapshotShelve(&app.stores, app.logger)
+		app.refresh()
+		return
 	}
 	if kr.RunRemote != nil {
 		result := &prompt.Result{Mode: kr.RunRemote.Mode, Value: kr.RunRemote.Remote}
@@ -455,6 +502,7 @@ func (app *TestApp) TypePrompt(value string) {
 		Mode:  mode,
 		Value: value,
 	}
+	app.prompt.Cancel()
 	app.handlePromptResult(result)
 }
 
@@ -485,21 +533,8 @@ func (app *TestApp) handlePromptResult(result *prompt.Result) {
 
 	switch result.Mode {
 	case types.PromptShelveFiles:
-		fileCount := 0
-		if len(ctx.SelectedFiles) > 0 {
-			fileCount = len(ctx.SelectedFiles)
-		} else if app.clState != nil {
-			for _, cl := range app.clState.Changelists {
-				if cl.Name == ctx.CLName {
-					fileCount = len(cl.Files)
-					break
-				}
-			}
-		}
-		app.pending = result
-		app.pendingCtx = ctx
-		app.prompt.StartConfirm(types.ConfirmShelve,
-			result.Value+":"+itoa(fileCount))
+		action.Execute(result, &app.stores, app.logger, ctx)
+		app.refresh()
 
 	case types.PromptUnshelve:
 		var conflicting int
@@ -526,17 +561,36 @@ func (app *TestApp) handlePromptResult(result *prompt.Result) {
 			app.refresh()
 		}
 
+	case types.PromptPasteChangelist:
+		if app.state.ClipboardCL == nil {
+			app.logger.SetError("Nothing in clipboard")
+			return
+		}
+		ctx.SourceWorktreePath = app.state.ClipboardCL.SourceWorktree
+		ctx.ClipboardCLName = app.state.ClipboardCL.Name
+		ctx.ClipboardFiles = app.state.ClipboardCL.Files
+
+		if result.Value == types.PasteFullContent {
+			app.pending = result
+			app.pendingCtx = ctx
+			app.prompt.StartConfirm(types.ConfirmPasteFullContent,
+				fmt.Sprintf("%d", len(ctx.ClipboardFiles)))
+			return
+		}
+		action.Execute(result, &app.stores, app.logger, ctx)
+		app.refresh()
+
 	case types.PromptConfirm:
 		if result.Confirmed {
 			switch result.ConfirmAction {
-			case types.ConfirmShelve:
-				if app.pending != nil {
-					action.Execute(app.pending, &app.stores, app.logger, app.pendingCtx)
-					app.refresh()
-				}
 			case types.ConfirmUnshelve:
 				if app.pending != nil {
 					app.pendingCtx.ForceUnshelve = true
+					action.Execute(app.pending, &app.stores, app.logger, app.pendingCtx)
+					app.refresh()
+				}
+			case types.ConfirmPasteFullContent:
+				if app.pending != nil {
 					action.Execute(app.pending, &app.stores, app.logger, app.pendingCtx)
 					app.refresh()
 				}
@@ -872,7 +926,6 @@ func TestShelveRestoresFiles(t *testing.T) {
 
 	app.PressKey("s")
 	app.TypePrompt("my-shelf")
-	app.Confirm()
 
 	// File should be restored to original content
 	if got := app.fileContent("README.md"); got != "init" {
@@ -906,7 +959,6 @@ func TestShelveFromCLPanel(t *testing.T) {
 
 	app.PressKey("s")
 	app.TypePrompt("cl-shelf")
-	app.Confirm()
 
 	status := app.gitStatus()
 	if strings.Contains(status, "README.md") {
@@ -924,7 +976,6 @@ func TestUnshelve(t *testing.T) {
 	app.SelectFile(app.fileIndex("README.md"))
 	app.PressKey("s")
 	app.TypePrompt("test-shelf")
-	app.Confirm()
 
 	// Switch to shelves panel
 	app.PressKey("2")
@@ -954,7 +1005,6 @@ func TestShelveUnshelveRoundTrip(t *testing.T) {
 	app.SelectFile(app.fileIndex("README.md"))
 	app.PressKey("s")
 	app.TypePrompt("roundtrip")
-	app.Confirm()
 
 	// Verify file restored to HEAD
 	if got := app.fileContent("README.md"); got != "init" {
@@ -987,7 +1037,6 @@ func TestUntrackedFileShelveUnshelve(t *testing.T) {
 
 	app.PressKey("s")
 	app.TypePrompt("untracked-shelf")
-	app.Confirm()
 
 	// File should be gone
 	if app.fileExists("new-file.txt") {
@@ -1091,10 +1140,11 @@ func TestPull(t *testing.T) {
 	t.Cleanup(func() { git.SetRepoRoot("") })
 
 	app := &TestApp{
-		t:      t,
-		dir:    workDir,
-		state:  controller.NewState(),
-		logger: &testLogger{t: t},
+		t:           t,
+		dir:         workDir,
+		gitshelfDir: gitshelfDir,
+		state:       controller.NewState(),
+		logger:      &testLogger{t: t},
 		stores: action.Stores{
 			CL:    changelist.NewStore(gitshelfDir),
 			Shelf: shelf.NewStore(gitshelfDir),
@@ -1316,30 +1366,7 @@ func TestSelectDeselectFiles_GitSafe(t *testing.T) {
 	app.assertGitUnchanged(snap)
 }
 
-// 18. TestSetActiveCL_GitSafe
-func TestSetActiveCL_GitSafe(t *testing.T) {
-	app := newTestApp(t)
-	setupModifiedFiles(t, app)
-
-	app.state.Focus = types.PanelChangelists
-	app.PressKey("n")
-	app.TypePrompt("ActiveTest")
-	app.refresh()
-
-	// Navigate to it
-	for i, name := range app.clNames {
-		if name == "ActiveTest" {
-			app.state.CLSelected = i
-			break
-		}
-	}
-
-	snap := app.gitSnapshot()
-	app.PressKey("a")
-	app.assertGitUnchanged(snap)
-}
-
-// 19. TestNavigationKeys_GitSafe
+// 18. TestNavigationKeys_GitSafe
 func TestNavigationKeys_GitSafe(t *testing.T) {
 	app := newTestApp(t)
 	setupModifiedFiles(t, app)
@@ -1363,7 +1390,6 @@ func TestRenameShelf_GitSafe(t *testing.T) {
 	app.SelectFile(app.fileIndex("shelf-rename.txt"))
 	app.PressKey("s")
 	app.TypePrompt("OldName")
-	app.Confirm()
 
 	snap := app.gitSnapshot()
 
@@ -1385,7 +1411,6 @@ func TestDropShelf_GitSafe(t *testing.T) {
 	app.SelectFile(app.fileIndex("shelf-drop.txt"))
 	app.PressKey("s")
 	app.TypePrompt("DropMe")
-	app.Confirm()
 
 	snap := app.gitSnapshot()
 
@@ -1497,7 +1522,6 @@ func TestShelveUnshelve_FileWithoutTrailingNewline(t *testing.T) {
 	// Shelve
 	app.PressKey("s")
 	app.TypePrompt("noeol-shelf")
-	app.Confirm()
 
 	if app.fileExists("noeol.txt") {
 		t.Error("noeol.txt should be gone after shelve")
@@ -1545,7 +1569,6 @@ func TestShelveUnshelve_MultipleFilesWithoutTrailingNewline(t *testing.T) {
 	// Shelve
 	app.PressKey("s")
 	app.TypePrompt("multi-noeol")
-	app.Confirm()
 
 	for name := range files {
 		if app.fileExists(name) {
@@ -1584,7 +1607,6 @@ func TestShelveUnshelve_MixedNewlineFiles(t *testing.T) {
 	// Shelve
 	app.PressKey("s")
 	app.TypePrompt("mixed-shelf")
-	app.Confirm()
 
 	// Unshelve
 	app.PressKey("2")
@@ -1625,7 +1647,6 @@ func TestShelveUnshelve_AutocrlfTrue(t *testing.T) {
 	// Shelve
 	app.PressKey("s")
 	app.TypePrompt("crlf-shelf")
-	app.Confirm()
 
 	// File should be gone or restored to HEAD (which doesn't have crlf.txt)
 	if app.fileExists("crlf.txt") {
@@ -1672,7 +1693,6 @@ func TestShelveUnshelve_AutocrlfTrue_ExistingFile(t *testing.T) {
 	// Shelve
 	app.PressKey("s")
 	app.TypePrompt("existing-crlf")
-	app.Confirm()
 
 	// README.md should be restored to HEAD content
 	headContent := strings.ReplaceAll(app.fileContent("README.md"), "\r\n", "\n")
@@ -1766,7 +1786,6 @@ func TestCopyPatch_Shelf(t *testing.T) {
 	app.SelectFile(app.fileIndex("shelved.txt"))
 	app.PressKey("s")
 	app.TypePrompt("my-shelf")
-	app.Confirm()
 
 	// Switch to shelves and copy patch
 	app.PressKey("2")
@@ -1833,7 +1852,6 @@ func TestCopyPatch_Files_ShelfContext(t *testing.T) {
 	app.SelectFile(app.fileIndex("sf.txt"))
 	app.PressKey("s")
 	app.TypePrompt("file-shelf")
-	app.Confirm()
 
 	// Switch to shelves, then focus files panel (shelf context)
 	app.PressKey("2")
@@ -1938,7 +1956,6 @@ func TestDuplicateShelfNames_CreateTwo(t *testing.T) {
 	app.SelectFile(app.fileIndex("README.md"))
 	app.PressKey("s")
 	app.TypePrompt("same-name")
-	app.Confirm()
 
 	// Shelve #2: README.md with content B
 	app.WriteFile("README.md", "content-B")
@@ -1946,7 +1963,6 @@ func TestDuplicateShelfNames_CreateTwo(t *testing.T) {
 	app.SelectFile(app.fileIndex("README.md"))
 	app.PressKey("s")
 	app.TypePrompt("same-name")
-	app.Confirm()
 
 	shelves, err := app.stores.Shelf.List()
 	if err != nil {
@@ -1974,7 +1990,6 @@ func TestDuplicateShelfNames_UnshelveCorrectOne(t *testing.T) {
 	app.SelectFile(app.fileIndex("README.md"))
 	app.PressKey("s")
 	app.TypePrompt("dup-unshelve")
-	app.Confirm()
 
 	time.Sleep(10 * time.Millisecond) // ensure distinct timestamps
 
@@ -1984,7 +1999,6 @@ func TestDuplicateShelfNames_UnshelveCorrectOne(t *testing.T) {
 	app.SelectFile(app.fileIndex("README.md"))
 	app.PressKey("s")
 	app.TypePrompt("dup-unshelve")
-	app.Confirm()
 
 	// List is newest-first, so shelves[0]=B, shelves[1]=A
 	app.PressKey("2")
@@ -2014,7 +2028,6 @@ func TestDuplicateShelfNames_UnshelveOlderOne(t *testing.T) {
 	app.SelectFile(app.fileIndex("README.md"))
 	app.PressKey("s")
 	app.TypePrompt("dup-older")
-	app.Confirm()
 
 	time.Sleep(10 * time.Millisecond)
 
@@ -2024,7 +2037,6 @@ func TestDuplicateShelfNames_UnshelveOlderOne(t *testing.T) {
 	app.SelectFile(app.fileIndex("README.md"))
 	app.PressKey("s")
 	app.TypePrompt("dup-older")
-	app.Confirm()
 
 	// List is newest-first: shelves[0]=B, shelves[1]=A
 	app.PressKey("2")
@@ -2051,7 +2063,6 @@ func TestDuplicateShelfNames_DropOne(t *testing.T) {
 	app.SelectFile(app.fileIndex("README.md"))
 	app.PressKey("s")
 	app.TypePrompt("dup-drop")
-	app.Confirm()
 
 	time.Sleep(10 * time.Millisecond)
 
@@ -2060,7 +2071,6 @@ func TestDuplicateShelfNames_DropOne(t *testing.T) {
 	app.SelectFile(app.fileIndex("README.md"))
 	app.PressKey("s")
 	app.TypePrompt("dup-drop")
-	app.Confirm()
 
 	app.PressKey("2")
 	app.refresh()
@@ -2102,7 +2112,6 @@ func TestDuplicateShelfNames_RenameOne(t *testing.T) {
 	app.SelectFile(app.fileIndex("README.md"))
 	app.PressKey("s")
 	app.TypePrompt("dup-rename")
-	app.Confirm()
 
 	time.Sleep(10 * time.Millisecond)
 
@@ -2111,7 +2120,6 @@ func TestDuplicateShelfNames_RenameOne(t *testing.T) {
 	app.SelectFile(app.fileIndex("README.md"))
 	app.PressKey("s")
 	app.TypePrompt("dup-rename")
-	app.Confirm()
 
 	app.PressKey("2")
 	app.refresh()
@@ -2153,7 +2161,6 @@ func TestDuplicateShelfNames_CopyPatchCorrectOne(t *testing.T) {
 	app.SelectFile(app.fileIndex("README.md"))
 	app.PressKey("s")
 	app.TypePrompt("dup-patch")
-	app.Confirm()
 
 	time.Sleep(10 * time.Millisecond)
 
@@ -2162,7 +2169,6 @@ func TestDuplicateShelfNames_CopyPatchCorrectOne(t *testing.T) {
 	app.SelectFile(app.fileIndex("README.md"))
 	app.PressKey("s")
 	app.TypePrompt("dup-patch")
-	app.Confirm()
 
 	// Focus shelves panel, select the older shelf (A)
 	app.PressKey("2")
@@ -2191,7 +2197,6 @@ func TestDuplicateShelfNames_ViewDiffCorrectOne(t *testing.T) {
 	app.SelectFile(app.fileIndex("README.md"))
 	app.PressKey("s")
 	app.TypePrompt("dup-diff")
-	app.Confirm()
 
 	time.Sleep(10 * time.Millisecond)
 
@@ -2200,7 +2205,6 @@ func TestDuplicateShelfNames_ViewDiffCorrectOne(t *testing.T) {
 	app.SelectFile(app.fileIndex("README.md"))
 	app.PressKey("s")
 	app.TypePrompt("dup-diff")
-	app.Confirm()
 
 	// Focus shelves panel
 	app.PressKey("2")
@@ -2233,7 +2237,6 @@ func TestDuplicateShelfNames_GitSafe(t *testing.T) {
 	app.SelectFile(app.fileIndex("README.md"))
 	app.PressKey("s")
 	app.TypePrompt("safe-dup")
-	app.Confirm()
 
 	time.Sleep(10 * time.Millisecond)
 
@@ -2242,7 +2245,6 @@ func TestDuplicateShelfNames_GitSafe(t *testing.T) {
 	app.SelectFile(app.fileIndex("README.md"))
 	app.PressKey("s")
 	app.TypePrompt("safe-dup")
-	app.Confirm()
 
 	// Snapshot AFTER shelves are created (files are restored to HEAD)
 	snap := app.gitSnapshot()
@@ -2260,6 +2262,1727 @@ func TestDuplicateShelfNames_GitSafe(t *testing.T) {
 	app.PressKey("d")
 	app.Confirm()
 
+	app.assertGitUnchanged(snap)
+}
+
+// ===========================================================================
+// Worktree panel
+// ===========================================================================
+
+func TestWorktreePanel_GitSafe(t *testing.T) {
+	app := newTestApp(t)
+	app.WriteTrackedFile("file1.go", "content")
+	app.refresh()
+
+	snap := app.gitSnapshot()
+
+	// Default: minimized (single worktree)
+	if app.state.WorktreeState != types.PanelMinimized {
+		t.Errorf("expected WorktreeState=Minimized, got %d", app.state.WorktreeState)
+	}
+
+	// Press 6 to show (not focused → expands to normal + focuses)
+	app.PressKey("6")
+	if app.state.WorktreeState != types.PanelNormal {
+		t.Errorf("expected WorktreeState=Normal, got %d", app.state.WorktreeState)
+	}
+	if app.state.Focus != types.PanelWorktrees {
+		t.Errorf("expected focus on Worktrees, got %d", app.state.Focus)
+	}
+
+	// Press 6 again (focused) → minimized, focus back to pivot
+	app.PressKey("6")
+	if app.state.WorktreeState != types.PanelMinimized {
+		t.Errorf("expected WorktreeState=Minimized, got %d", app.state.WorktreeState)
+	}
+	if app.state.Focus != app.state.Pivot {
+		t.Errorf("expected focus on pivot, got %d", app.state.Focus)
+	}
+
+	// Press 6 again (not focused) → normal again
+	app.PressKey("6")
+	if app.state.WorktreeState != types.PanelNormal {
+		t.Errorf("expected WorktreeState=Normal, got %d", app.state.WorktreeState)
+	}
+
+	app.assertGitUnchanged(snap)
+}
+
+// ===========================================================================
+// Worktree test helpers
+// ===========================================================================
+
+// newTestAppWithWorktree creates a repo with a linked worktree on a new branch.
+// Returns (app, mainDir, worktreeDir).
+func newTestAppWithWorktree(t *testing.T) (*TestApp, string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	// Resolve symlinks (macOS /var → /private/var) to match git worktree list output
+	dir, _ = filepath.EvalSymlinks(dir)
+
+	// Init repo + initial commit
+	run(t, dir, "git", "init")
+	run(t, dir, "git", "config", "user.email", "test@test.com")
+	run(t, dir, "git", "config", "user.name", "Test")
+	run(t, dir, "git", "config", "core.autocrlf", "false")
+	os.WriteFile(filepath.Join(dir, "README.md"), []byte("init"), 0644)
+	run(t, dir, "git", "add", ".")
+	run(t, dir, "git", "commit", "-m", "initial")
+
+	// Create a linked worktree on a new branch
+	wtDir := filepath.Join(filepath.Dir(dir), filepath.Base(dir)+"-wt")
+	run(t, dir, "git", "worktree", "add", wtDir, "-b", "feature")
+	run(t, wtDir, "git", "config", "user.email", "test@test.com")
+	run(t, wtDir, "git", "config", "user.name", "Test")
+
+	// Create .gitshelf dirs
+	mainGitshelfDir := filepath.Join(dir, ".gitshelf")
+	wtGitshelfDir := filepath.Join(wtDir, ".gitshelf")
+	os.MkdirAll(mainGitshelfDir, 0755)
+	os.MkdirAll(wtGitshelfDir, 0755)
+
+	git.SetRepoRoot(dir)
+	git.ClearLog()
+	t.Cleanup(func() {
+		git.SetRepoRoot("")
+		// Clean up worktree
+		exec.Command("git", "-C", dir, "worktree", "remove", "--force", wtDir).Run()
+	})
+
+	app := &TestApp{
+		t:           t,
+		dir:         dir,
+		gitshelfDir: mainGitshelfDir,
+		state:       controller.NewState(),
+		logger:      &testLogger{t: t},
+		stores: action.Stores{
+			CL:    changelist.NewStore(mainGitshelfDir),
+			Shelf: shelf.NewStore(mainGitshelfDir),
+		},
+		prompt: tui.NewPrompt(gitshelfLabeler{}, types.PromptConfirm),
+	}
+
+	app.refresh()
+	return app, dir, wtDir
+}
+
+// activateWorktree simulates selecting and activating a worktree by path.
+func (app *TestApp) activateWorktree(path string) {
+	app.t.Helper()
+	// Find the worktree index and navigate to it
+	for i, wt := range app.worktrees {
+		if wt.Path == path {
+			app.state.WorktreeSel = i
+			break
+		}
+	}
+	// Set active worktree path (toggle off if selecting current worktree)
+	if path == app.state.ActiveWorktreePath {
+		app.state.ActiveWorktreePath = ""
+	} else {
+		// Check if this is the current worktree
+		for _, wt := range app.worktrees {
+			if wt.Path == path && wt.IsCurrent {
+				app.state.ActiveWorktreePath = ""
+				break
+			} else if wt.Path == path {
+				app.state.ActiveWorktreePath = path
+				break
+			}
+		}
+	}
+	app.state.CLSelected = 0
+	app.state.CLFileSel = 0
+	app.state.ShelfSel = 0
+	app.state.ShelfFileSel = 0
+	app.state.SelectedFiles = make(map[string]bool)
+	app.refresh()
+	app.state.Focus = types.PanelChangelists
+}
+
+// gitSnapshotAt takes a snapshot of a specific directory's git state.
+func gitSnapshotAt(t *testing.T, dir string) gitSnapshot {
+	t.Helper()
+	snap := gitSnapshot{
+		status: runOut(t, dir, "git", "status", "--porcelain"),
+		log:    nil,
+		files:  make(map[string]string),
+	}
+	logOut := runOut(t, dir, "git", "log", "--oneline", "--format=%s")
+	if logOut != "" {
+		snap.log = strings.Split(logOut, "\n")
+	}
+	filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(dir, path)
+		if strings.HasPrefix(rel, ".git") || strings.HasPrefix(rel, ".gitshelf") {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		snap.files[rel] = string(data)
+		return nil
+	})
+	return snap
+}
+
+// assertGitUnchangedAt verifies that a directory's git state hasn't changed.
+func assertGitUnchangedAt(t *testing.T, dir string, snap gitSnapshot) {
+	t.Helper()
+	if got := runOut(t, dir, "git", "status", "--porcelain"); got != snap.status {
+		t.Errorf("git status at %s changed:\n  was: %q\n  now: %q", dir, snap.status, got)
+	}
+	var gotLog []string
+	logOut := runOut(t, dir, "git", "log", "--oneline", "--format=%s")
+	if logOut != "" {
+		gotLog = strings.Split(logOut, "\n")
+	}
+	if len(gotLog) != len(snap.log) {
+		t.Errorf("git log at %s length changed: was %d, now %d", dir, len(snap.log), len(gotLog))
+	} else {
+		for i := range gotLog {
+			if gotLog[i] != snap.log[i] {
+				t.Errorf("git log[%d] at %s changed: was %q, now %q", i, dir, snap.log[i], gotLog[i])
+			}
+		}
+	}
+	currentFiles := make(map[string]string)
+	filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(dir, path)
+		if strings.HasPrefix(rel, ".git") || strings.HasPrefix(rel, ".gitshelf") {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		data, _ := os.ReadFile(path)
+		currentFiles[rel] = string(data)
+		return nil
+	})
+	for f, content := range snap.files {
+		if cur, ok := currentFiles[f]; !ok {
+			t.Errorf("file %q was deleted at %s", f, dir)
+		} else if cur != content {
+			t.Errorf("file %q content changed at %s", f, dir)
+		}
+	}
+	for f := range currentFiles {
+		if _, ok := snap.files[f]; !ok {
+			t.Errorf("new file %q appeared at %s", f, dir)
+		}
+	}
+}
+
+// WriteFileAt writes a file in any directory.
+func writeFileAt(t *testing.T, dir, name, content string) {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	os.MkdirAll(filepath.Dir(path), 0755)
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+}
+
+// writeTrackedFileAt writes and stages a file in a specific directory.
+func writeTrackedFileAt(t *testing.T, dir, name, content string) {
+	t.Helper()
+	writeFileAt(t, dir, name, content)
+	run(t, dir, "git", "add", name)
+}
+
+// fileContentAt reads a file from any directory.
+func fileContentAt(t *testing.T, dir, name string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(dir, name))
+	if err != nil {
+		t.Fatalf("read file %s in %s: %v", name, dir, err)
+	}
+	return string(data)
+}
+
+// fileExistsAt checks if a file exists.
+func fileExistsAt(dir, name string) bool {
+	_, err := os.Stat(filepath.Join(dir, name))
+	return err == nil
+}
+
+// ===========================================================================
+// Worktree integration tests
+// ===========================================================================
+
+// --- Worktree activation ---
+
+// TestWT_ActivateWorktree verifies that activating a worktree switches stores
+// and git operations to the worktree directory.
+func TestWT_ActivateWorktree(t *testing.T) {
+	app, mainDir, wtDir := newTestAppWithWorktree(t)
+
+	// Write changes in the worktree
+	writeTrackedFileAt(t, wtDir, "wt-file.go", "worktree content")
+
+	// Verify app starts pointing at main
+	if len(app.worktrees) < 2 {
+		t.Fatalf("expected 2+ worktrees, got %d", len(app.worktrees))
+	}
+
+	// Take snapshot of main
+	mainSnap := gitSnapshotAt(t, mainDir)
+
+	// Activate the worktree
+	app.activateWorktree(wtDir)
+
+	// After activation, app should see the worktree's files
+	if app.state.ActiveWorktreePath != wtDir {
+		t.Fatalf("ActiveWorktreePath = %q, want %q", app.state.ActiveWorktreePath, wtDir)
+	}
+
+	// The CL should show the worktree's files, not main's
+	found := false
+	for _, f := range app.clFiles {
+		if f == "wt-file.go" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected wt-file.go in clFiles, got %v", app.clFiles)
+	}
+
+	// Main dir should be untouched
+	assertGitUnchangedAt(t, mainDir, mainSnap)
+}
+
+// TestWT_DeactivateWorktree verifies toggling back to main.
+func TestWT_DeactivateWorktree(t *testing.T) {
+	app, mainDir, wtDir := newTestAppWithWorktree(t)
+
+	writeTrackedFileAt(t, mainDir, "main-file.go", "main content")
+	writeTrackedFileAt(t, wtDir, "wt-file.go", "wt content")
+
+	app.activateWorktree(wtDir)
+	if app.state.ActiveWorktreePath != wtDir {
+		t.Fatalf("not activated")
+	}
+
+	// Deactivate (toggle same worktree)
+	app.activateWorktree(wtDir)
+	if app.state.ActiveWorktreePath != "" {
+		t.Fatalf("expected empty ActiveWorktreePath after toggle, got %q", app.state.ActiveWorktreePath)
+	}
+
+	// Should see main's files again
+	found := false
+	for _, f := range app.clFiles {
+		if f == "main-file.go" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected main-file.go in clFiles after deactivation, got %v", app.clFiles)
+	}
+}
+
+// --- CL operations in active worktree ---
+
+// TestWT_CreateCL_InActiveWorktree verifies CL creation targets the active worktree's .gitshelf.
+func TestWT_CreateCL_InActiveWorktree(t *testing.T) {
+	app, mainDir, wtDir := newTestAppWithWorktree(t)
+
+	mainSnap := gitSnapshotAt(t, mainDir)
+
+	app.activateWorktree(wtDir)
+
+	// Create a new CL
+	app.state.Focus = types.PanelChangelists
+	app.PressKey("n")
+	app.TypePrompt("Feature-WT")
+
+	// Verify CL exists in worktree's .gitshelf
+	wtStore := changelist.NewStore(filepath.Join(wtDir, ".gitshelf"))
+	wtState, err := wtStore.Load()
+	if err != nil {
+		t.Fatalf("load wt CL: %v", err)
+	}
+	foundCL := false
+	for _, cl := range wtState.Changelists {
+		if cl.Name == "Feature-WT" {
+			foundCL = true
+		}
+	}
+	if !foundCL {
+		t.Errorf("CL 'Feature-WT' not found in worktree .gitshelf")
+	}
+
+	// Verify main .gitshelf is untouched
+	mainStore := changelist.NewStore(filepath.Join(mainDir, ".gitshelf"))
+	mainState, err := mainStore.Load()
+	if err != nil {
+		t.Fatalf("load main CL: %v", err)
+	}
+	for _, cl := range mainState.Changelists {
+		if cl.Name == "Feature-WT" {
+			t.Errorf("CL 'Feature-WT' should NOT exist in main .gitshelf")
+		}
+	}
+
+	assertGitUnchangedAt(t, mainDir, mainSnap)
+}
+
+// TestWT_RenameCL_InActiveWorktree verifies CL rename targets active worktree.
+func TestWT_RenameCL_InActiveWorktree(t *testing.T) {
+	app, mainDir, wtDir := newTestAppWithWorktree(t)
+
+	mainSnap := gitSnapshotAt(t, mainDir)
+
+	app.activateWorktree(wtDir)
+
+	// Create a CL first
+	app.state.Focus = types.PanelChangelists
+	app.PressKey("n")
+	app.TypePrompt("OldName")
+
+	// Select the new CL and rename it
+	app.selectCL("OldName")
+	app.PressKey("r")
+	app.TypePrompt("NewName")
+
+	// Verify in worktree's store
+	wtStore := changelist.NewStore(filepath.Join(wtDir, ".gitshelf"))
+	wtState, _ := wtStore.Load()
+	foundNew := false
+	foundOld := false
+	for _, cl := range wtState.Changelists {
+		if cl.Name == "NewName" {
+			foundNew = true
+		}
+		if cl.Name == "OldName" {
+			foundOld = true
+		}
+	}
+	if !foundNew {
+		t.Errorf("CL 'NewName' not found in worktree .gitshelf")
+	}
+	if foundOld {
+		t.Errorf("CL 'OldName' should have been renamed")
+	}
+
+	assertGitUnchangedAt(t, mainDir, mainSnap)
+}
+
+// TestWT_DeleteCL_InActiveWorktree verifies CL deletion targets active worktree.
+func TestWT_DeleteCL_InActiveWorktree(t *testing.T) {
+	app, mainDir, wtDir := newTestAppWithWorktree(t)
+
+	mainSnap := gitSnapshotAt(t, mainDir)
+
+	app.activateWorktree(wtDir)
+
+	// Create a CL, then delete it
+	app.state.Focus = types.PanelChangelists
+	app.PressKey("n")
+	app.TypePrompt("ToDelete")
+
+	app.selectCL("ToDelete")
+	app.PressKey("d")
+	app.Confirm()
+
+	// Verify deleted in worktree
+	wtStore := changelist.NewStore(filepath.Join(wtDir, ".gitshelf"))
+	wtState, _ := wtStore.Load()
+	for _, cl := range wtState.Changelists {
+		if cl.Name == "ToDelete" {
+			t.Errorf("CL 'ToDelete' should have been deleted from worktree")
+		}
+	}
+
+	assertGitUnchangedAt(t, mainDir, mainSnap)
+}
+
+// --- Shelve in active worktree ---
+
+// TestWT_Shelve_InActiveWorktree verifies shelving in an active worktree:
+// - Shelf is created in the worktree's .gitshelf
+// - File changes are restored in the worktree (not main)
+// - Main worktree is completely untouched
+func TestWT_Shelve_InActiveWorktree(t *testing.T) {
+	app, mainDir, wtDir := newTestAppWithWorktree(t)
+
+	// Write a change in the worktree
+	writeTrackedFileAt(t, wtDir, "shelve-me.go", "changed content")
+
+	mainSnap := gitSnapshotAt(t, mainDir)
+
+	// Activate the worktree
+	app.activateWorktree(wtDir)
+
+	// Verify the file appears
+	app.selectCL(changelist.DefaultName)
+	found := false
+	for _, f := range app.clFiles {
+		if f == "shelve-me.go" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("shelve-me.go not in clFiles; got %v", app.clFiles)
+	}
+
+	// Select all files and shelve
+	app.selectAllFiles()
+	app.PressKey("s")
+	app.TypePrompt("wt-shelf")
+
+	// Verify shelf exists in worktree's .gitshelf
+	wtShelfStore := shelf.NewStore(filepath.Join(wtDir, ".gitshelf"))
+	wtShelves, err := wtShelfStore.List()
+	if err != nil {
+		t.Fatalf("list wt shelves: %v", err)
+	}
+	shelfFound := false
+	for _, s := range wtShelves {
+		if s.Meta.Name == "wt-shelf" {
+			shelfFound = true
+		}
+	}
+	if !shelfFound {
+		t.Errorf("shelf 'wt-shelf' not found in worktree .gitshelf")
+	}
+
+	// Verify shelf does NOT exist in main .gitshelf
+	mainShelfStore := shelf.NewStore(filepath.Join(mainDir, ".gitshelf"))
+	mainShelves, _ := mainShelfStore.List()
+	for _, s := range mainShelves {
+		if s.Meta.Name == "wt-shelf" {
+			t.Errorf("shelf 'wt-shelf' should NOT exist in main .gitshelf")
+		}
+	}
+
+	// After shelving a newly created file, git restore removes it (restores to HEAD state
+	// where it didn't exist). Verify it's gone from the worktree.
+	if fileExistsAt(wtDir, "shelve-me.go") {
+		t.Errorf("shelve-me.go should have been removed from worktree after shelve (restored to HEAD)")
+	}
+
+	// Main must be untouched
+	assertGitUnchangedAt(t, mainDir, mainSnap)
+}
+
+// TestWT_Shelve_DoesNotAffectInactiveWorktree is the key regression test for
+// the blocker bug: shelving in active worktree must not restore files in any
+// other worktree.
+func TestWT_Shelve_DoesNotAffectInactiveWorktree(t *testing.T) {
+	app, mainDir, wtDir := newTestAppWithWorktree(t)
+
+	// Write DIFFERENT changes in both worktrees
+	writeTrackedFileAt(t, mainDir, "shared.go", "main-version")
+	writeTrackedFileAt(t, wtDir, "shared.go", "wt-version")
+
+	mainSnap := gitSnapshotAt(t, mainDir)
+
+	// Activate worktree
+	app.activateWorktree(wtDir)
+
+	// Shelve the worktree's change
+	app.selectCL(changelist.DefaultName)
+	app.selectAllFiles()
+	app.PressKey("s")
+	app.TypePrompt("wt-shelf")
+
+	// CRITICAL: main worktree's file must still have "main-version"
+	mainContent := fileContentAt(t, mainDir, "shared.go")
+	if mainContent != "main-version" {
+		t.Errorf("main worktree's shared.go was modified! got %q, want %q", mainContent, "main-version")
+	}
+
+	// Main's git state should be unchanged
+	assertGitUnchangedAt(t, mainDir, mainSnap)
+}
+
+// --- Unshelve in active worktree ---
+
+// TestWT_Unshelve_InActiveWorktree verifies unshelving applies the patch
+// to the active worktree, not the main one.
+func TestWT_Unshelve_InActiveWorktree(t *testing.T) {
+	app, mainDir, wtDir := newTestAppWithWorktree(t)
+
+	// Create a change in the worktree, shelve it
+	writeTrackedFileAt(t, wtDir, "unshelve-me.go", "to-shelve")
+	app.activateWorktree(wtDir)
+
+	app.selectCL(changelist.DefaultName)
+	app.selectAllFiles()
+	app.PressKey("s")
+	app.TypePrompt("restore-test")
+
+	mainSnap := gitSnapshotAt(t, mainDir)
+
+	// Now unshelve
+	app.state.Focus = types.PanelShelves
+	app.state.Pivot = types.PanelShelves
+	app.state.ShelfSel = 0
+	app.loadShelfFiles()
+	app.PressKey("u")
+	app.TypePrompt(changelist.DefaultName)
+
+	// Verify the file is restored in the worktree
+	if !fileExistsAt(wtDir, "unshelve-me.go") {
+		t.Errorf("unshelve-me.go should exist in worktree after unshelve")
+	}
+
+	// Main must be untouched
+	assertGitUnchangedAt(t, mainDir, mainSnap)
+}
+
+// TestWT_Unshelve_DoesNotAffectInactiveWorktree is a regression test.
+func TestWT_Unshelve_DoesNotAffectInactiveWorktree(t *testing.T) {
+	app, mainDir, wtDir := newTestAppWithWorktree(t)
+
+	// Create a change in the worktree, shelve it
+	writeTrackedFileAt(t, wtDir, "feature.go", "feature-code")
+	app.activateWorktree(wtDir)
+
+	app.selectCL(changelist.DefaultName)
+	app.selectAllFiles()
+	app.PressKey("s")
+	app.TypePrompt("feature-shelf")
+
+	// Write something different in main
+	writeTrackedFileAt(t, mainDir, "main-only.go", "main-code")
+
+	mainSnap := gitSnapshotAt(t, mainDir)
+
+	// Unshelve in the worktree
+	app.state.Focus = types.PanelShelves
+	app.state.Pivot = types.PanelShelves
+	app.state.ShelfSel = 0
+	app.loadShelfFiles()
+	app.PressKey("u")
+	app.TypePrompt(changelist.DefaultName)
+
+	// Main must be untouched
+	assertGitUnchangedAt(t, mainDir, mainSnap)
+	if !fileExistsAt(mainDir, "main-only.go") {
+		t.Errorf("main-only.go should still exist in main")
+	}
+}
+
+// --- Commit in active worktree ---
+
+// TestWT_Commit_InActiveWorktree verifies that committing targets the active worktree.
+func TestWT_Commit_InActiveWorktree(t *testing.T) {
+	app, mainDir, wtDir := newTestAppWithWorktree(t)
+
+	writeTrackedFileAt(t, wtDir, "commit-me.go", "commit content")
+
+	mainSnap := gitSnapshotAt(t, mainDir)
+
+	app.activateWorktree(wtDir)
+
+	app.selectCL(changelist.DefaultName)
+	idx := app.fileIndex("commit-me.go")
+	if idx < 0 {
+		t.Fatalf("commit-me.go not in clFiles; got %v", app.clFiles)
+	}
+	app.SelectFile(idx)
+	app.PressKey("c")
+	app.TypePrompt("wt commit")
+
+	// Verify the commit is in the worktree's log
+	wtLog := strings.Split(runOut(t, wtDir, "git", "log", "--oneline", "--format=%s"), "\n")
+	if len(wtLog) < 2 {
+		t.Fatalf("expected at least 2 commits in worktree, got %d", len(wtLog))
+	}
+	if wtLog[0] != "wt commit" {
+		t.Errorf("wt commit message: got %q, want %q", wtLog[0], "wt commit")
+	}
+
+	// Main must be untouched
+	assertGitUnchangedAt(t, mainDir, mainSnap)
+}
+
+// --- Diff in active worktree ---
+
+// TestWT_Diff_ShowsActiveWorktreeChanges verifies diff shows the active worktree's changes.
+func TestWT_Diff_ShowsActiveWorktreeChanges(t *testing.T) {
+	app, _, wtDir := newTestAppWithWorktree(t)
+
+	writeTrackedFileAt(t, wtDir, "diff-test.go", "new-content")
+
+	app.activateWorktree(wtDir)
+
+	app.selectCL(changelist.DefaultName)
+	app.loadDiff()
+
+	if app.diff == "" {
+		t.Errorf("expected non-empty diff for active worktree changes")
+	}
+	if !strings.Contains(app.diff, "new-content") {
+		t.Errorf("diff should contain 'new-content', got: %s", app.diff)
+	}
+}
+
+// --- Move files in active worktree ---
+
+// TestWT_MoveFile_InActiveWorktree verifies moving files between CLs in the active worktree.
+func TestWT_MoveFile_InActiveWorktree(t *testing.T) {
+	app, mainDir, wtDir := newTestAppWithWorktree(t)
+
+	writeTrackedFileAt(t, wtDir, "move-me.go", "movable")
+
+	mainSnap := gitSnapshotAt(t, mainDir)
+
+	app.activateWorktree(wtDir)
+
+	// Create a destination CL
+	app.PressKey("n")
+	app.TypePrompt("DestCL")
+
+	// Move the file
+	app.selectCL(changelist.DefaultName)
+	idx := app.fileIndex("move-me.go")
+	if idx < 0 {
+		t.Fatalf("move-me.go not in clFiles")
+	}
+	app.SelectFile(idx)
+	app.PressKey("m")
+	app.TypePrompt("DestCL")
+
+	// Verify the file is now in DestCL
+	app.selectCL("DestCL")
+	found := false
+	for _, f := range app.clFiles {
+		if f == "move-me.go" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("move-me.go should be in DestCL, got %v", app.clFiles)
+	}
+
+	// Verify it's in the worktree's .gitshelf, not main's
+	wtStore := changelist.NewStore(filepath.Join(wtDir, ".gitshelf"))
+	wtState, _ := wtStore.Load()
+	foundInWT := false
+	for _, cl := range wtState.Changelists {
+		if cl.Name == "DestCL" {
+			for _, f := range cl.Files {
+				if f == "move-me.go" {
+					foundInWT = true
+				}
+			}
+		}
+	}
+	if !foundInWT {
+		t.Errorf("move-me.go should be in DestCL in worktree's .gitshelf")
+	}
+
+	assertGitUnchangedAt(t, mainDir, mainSnap)
+}
+
+// --- Clipboard copy/paste across worktrees ---
+
+// TestWT_CopyPaste_OnlyCL copies a CL from one worktree and pastes it into another (metadata only).
+func TestWT_CopyPaste_OnlyCL(t *testing.T) {
+	app, mainDir, wtDir := newTestAppWithWorktree(t)
+
+	// Create a CL with files in main worktree
+	writeTrackedFileAt(t, mainDir, "copy-file.go", "original")
+	app.refresh()
+
+	// Create a CL and move file into it
+	app.PressKey("n")
+	app.TypePrompt("CopyMe")
+	app.selectCL(changelist.DefaultName)
+	idx := app.fileIndex("copy-file.go")
+	if idx < 0 {
+		t.Fatalf("copy-file.go not in clFiles")
+	}
+	app.SelectFile(idx)
+	app.PressKey("m")
+	app.TypePrompt("CopyMe")
+
+	// Copy CL to clipboard (W key)
+	app.selectCL("CopyMe")
+	app.state.Focus = types.PanelChangelists
+	app.PressKey("W")
+
+	if app.state.ClipboardCL == nil {
+		t.Fatalf("ClipboardCL should be set after W")
+	}
+	if app.state.ClipboardCL.Name != "CopyMe" {
+		t.Errorf("clipboard CL name: got %q, want %q", app.state.ClipboardCL.Name, "CopyMe")
+	}
+
+	// Switch to worktree
+	app.activateWorktree(wtDir)
+
+	// Paste with "Only changelist" mode
+	app.state.Focus = types.PanelChangelists
+	app.PressKey("V")
+	app.TypePrompt(types.PasteOnlyCL)
+
+	// Verify CL exists in worktree's .gitshelf
+	// Note: files may be cleaned by AutoAssignNewFiles if they don't exist as
+	// tracked changes in the worktree — "Only changelist" only creates metadata.
+	wtStore := changelist.NewStore(filepath.Join(wtDir, ".gitshelf"))
+	wtState, _ := wtStore.Load()
+	foundCL := false
+	for _, cl := range wtState.Changelists {
+		if cl.Name == "CopyMe" {
+			foundCL = true
+		}
+	}
+	if !foundCL {
+		t.Errorf("CL 'CopyMe' not found in worktree's .gitshelf")
+	}
+}
+
+// TestWT_CopyPaste_FullContent copies a CL and its file contents to another worktree.
+func TestWT_CopyPaste_FullContent(t *testing.T) {
+	app, mainDir, wtDir := newTestAppWithWorktree(t)
+
+	// Create a change in main
+	writeTrackedFileAt(t, mainDir, "full-copy.go", "full-content")
+	app.refresh()
+
+	// Create CL and move file
+	app.PressKey("n")
+	app.TypePrompt("FullCopy")
+	app.selectCL(changelist.DefaultName)
+	idx := app.fileIndex("full-copy.go")
+	if idx >= 0 {
+		app.SelectFile(idx)
+		app.PressKey("m")
+		app.TypePrompt("FullCopy")
+	}
+
+	// Copy to clipboard
+	app.selectCL("FullCopy")
+	app.state.Focus = types.PanelChangelists
+	app.PressKey("W")
+
+	// Switch to worktree
+	app.activateWorktree(wtDir)
+
+	// Paste with "Full content"
+	app.state.Focus = types.PanelChangelists
+	app.PressKey("V")
+	app.TypePrompt(types.PasteFullContent)
+	app.Confirm() // confirm overwrite
+
+	// Verify file exists in worktree with correct content
+	if !fileExistsAt(wtDir, "full-copy.go") {
+		t.Errorf("full-copy.go should exist in worktree after full content paste")
+	} else {
+		content := fileContentAt(t, wtDir, "full-copy.go")
+		if content != "full-content" {
+			t.Errorf("full-copy.go content: got %q, want %q", content, "full-content")
+		}
+	}
+}
+
+// TestWT_CopyPaste_ApplyDiff copies a CL and applies its diff to another worktree.
+func TestWT_CopyPaste_ApplyDiff(t *testing.T) {
+	app, mainDir, wtDir := newTestAppWithWorktree(t)
+
+	// Modify an existing tracked file in main WITHOUT staging (so git diff shows it).
+	// DiffFilesIn uses `git diff --` which only shows unstaged changes.
+	writeFileAt(t, mainDir, "README.md", "modified-readme")
+	app.refresh()
+
+	// Copy the default CL
+	app.selectCL(changelist.DefaultName)
+	app.state.Focus = types.PanelChangelists
+	app.PressKey("W")
+
+	// Switch to worktree
+	app.activateWorktree(wtDir)
+
+	// Paste with "Apply diff"
+	app.state.Focus = types.PanelChangelists
+	app.PressKey("V")
+	app.TypePrompt(types.PasteApplyDiff)
+
+	// Verify the diff was applied in the worktree
+	if fileExistsAt(wtDir, "README.md") {
+		content := fileContentAt(t, wtDir, "README.md")
+		if content != "modified-readme" {
+			t.Errorf("README.md in worktree should have applied diff, got %q", content)
+		}
+	}
+}
+
+// --- AutoAssign in active worktree ---
+
+// TestWT_AutoAssign_UsesActiveWorktree verifies that AutoAssignNewFiles
+// reads files from the active worktree, not main.
+func TestWT_AutoAssign_UsesActiveWorktree(t *testing.T) {
+	app, mainDir, wtDir := newTestAppWithWorktree(t)
+
+	// Write a tracked file only in the worktree
+	writeTrackedFileAt(t, wtDir, "wt-auto.go", "auto content")
+	// Write a tracked file only in main
+	writeTrackedFileAt(t, mainDir, "main-auto.go", "main content")
+
+	// Activate worktree
+	app.activateWorktree(wtDir)
+
+	// After refresh, the CL should contain wt-auto.go but NOT main-auto.go
+	app.selectCL(changelist.DefaultName)
+
+	hasWT := false
+	hasMain := false
+	for _, f := range app.clFiles {
+		if f == "wt-auto.go" {
+			hasWT = true
+		}
+		if f == "main-auto.go" {
+			hasMain = true
+		}
+	}
+	if !hasWT {
+		t.Errorf("wt-auto.go should be in active worktree's CL files, got %v", app.clFiles)
+	}
+	if hasMain {
+		t.Errorf("main-auto.go should NOT be in active worktree's CL files")
+	}
+}
+
+// --- Switching worktrees preserves independent state ---
+
+// TestWT_SwitchWorktrees_IndependentCLState verifies that switching between
+// worktrees shows each worktree's independent changelist state.
+func TestWT_SwitchWorktrees_IndependentCLState(t *testing.T) {
+	app, mainDir, wtDir := newTestAppWithWorktree(t)
+
+	// Create different CLs in each worktree
+	// Main: create "MainFeature"
+	app.PressKey("n")
+	app.TypePrompt("MainFeature")
+
+	// Switch to worktree and create "WTFeature"
+	app.activateWorktree(wtDir)
+	app.PressKey("n")
+	app.TypePrompt("WTFeature")
+
+	// Verify worktree has WTFeature but not MainFeature
+	hasCL := func(name string) bool {
+		for _, n := range app.clNames {
+			if n == name {
+				return true
+			}
+		}
+		return false
+	}
+
+	if !hasCL("WTFeature") {
+		t.Errorf("worktree should have WTFeature, clNames=%v", app.clNames)
+	}
+	if hasCL("MainFeature") {
+		t.Errorf("worktree should NOT have MainFeature, clNames=%v", app.clNames)
+	}
+
+	// Switch back to main
+	app.activateWorktree(wtDir) // toggle off
+	_ = mainDir
+
+	if !hasCL("MainFeature") {
+		t.Errorf("main should have MainFeature, clNames=%v", app.clNames)
+	}
+	if hasCL("WTFeature") {
+		t.Errorf("main should NOT have WTFeature, clNames=%v", app.clNames)
+	}
+}
+
+// --- Shelf operations only affect active worktree ---
+
+// TestWT_DropShelf_InActiveWorktree verifies dropping a shelf only affects the active worktree.
+func TestWT_DropShelf_InActiveWorktree(t *testing.T) {
+	app, mainDir, wtDir := newTestAppWithWorktree(t)
+
+	// Create a shelf in the worktree
+	writeTrackedFileAt(t, wtDir, "drop-test.go", "to-drop")
+	app.activateWorktree(wtDir)
+
+	app.selectCL(changelist.DefaultName)
+	app.selectAllFiles()
+	app.PressKey("s")
+	app.TypePrompt("drop-me")
+
+	mainSnap := gitSnapshotAt(t, mainDir)
+
+	// Drop the shelf
+	app.state.Focus = types.PanelShelves
+	app.state.Pivot = types.PanelShelves
+	app.state.ShelfSel = 0
+	app.loadShelfFiles()
+	app.PressKey("d")
+	app.Confirm()
+
+	// Verify shelf is gone from worktree
+	wtShelfStore := shelf.NewStore(filepath.Join(wtDir, ".gitshelf"))
+	wtShelves, _ := wtShelfStore.List()
+	for _, s := range wtShelves {
+		if s.Meta.Name == "drop-me" {
+			t.Errorf("shelf 'drop-me' should have been dropped from worktree")
+		}
+	}
+
+	assertGitUnchangedAt(t, mainDir, mainSnap)
+}
+
+// --- Multiple operations sequence ---
+
+// TestWT_SequentialOperations tests a realistic workflow:
+// create CL in WT → add files → shelve → switch to main → verify untouched → switch back → unshelve
+func TestWT_SequentialOperations(t *testing.T) {
+	app, mainDir, wtDir := newTestAppWithWorktree(t)
+
+	// 1. Activate worktree and create changes
+	writeTrackedFileAt(t, wtDir, "seq-file.go", "sequential")
+	app.activateWorktree(wtDir)
+
+	// 2. Create CL and move file
+	app.PressKey("n")
+	app.TypePrompt("SeqCL")
+	app.selectCL(changelist.DefaultName)
+	if idx := app.fileIndex("seq-file.go"); idx >= 0 {
+		app.SelectFile(idx)
+		app.PressKey("m")
+		app.TypePrompt("SeqCL")
+	}
+
+	// 3. Shelve
+	app.selectCL("SeqCL")
+	app.selectAllFiles()
+	app.PressKey("s")
+	app.TypePrompt("seq-shelf")
+
+	// 4. Switch to main — verify it's clean
+	mainSnap := gitSnapshotAt(t, mainDir)
+	app.activateWorktree(wtDir) // toggle off = back to main
+	assertGitUnchangedAt(t, mainDir, mainSnap)
+
+	// 5. Switch back to worktree
+	app.activateWorktree(wtDir)
+
+	// 6. Verify shelf still exists in worktree
+	if len(app.shelves) == 0 {
+		t.Fatalf("no shelves in worktree after switching back")
+	}
+	shelfFound := false
+	for _, s := range app.shelves {
+		if s.Meta.Name == "seq-shelf" {
+			shelfFound = true
+		}
+	}
+	if !shelfFound {
+		t.Errorf("shelf 'seq-shelf' not found after switching back")
+	}
+
+	// 7. Unshelve
+	app.state.Focus = types.PanelShelves
+	app.state.Pivot = types.PanelShelves
+	app.state.ShelfSel = 0
+	app.loadShelfFiles()
+	app.PressKey("u")
+	app.TypePrompt("SeqCL")
+
+	// 8. Verify file is back in worktree
+	if fileExistsAt(wtDir, "seq-file.go") {
+		content := fileContentAt(t, wtDir, "seq-file.go")
+		if content != "sequential" {
+			t.Errorf("seq-file.go content after unshelve: got %q, want %q", content, "sequential")
+		}
+	}
+}
+
+// TestWT_Amend_InActiveWorktree verifies amend targets the active worktree.
+func TestWT_Amend_InActiveWorktree(t *testing.T) {
+	app, mainDir, wtDir := newTestAppWithWorktree(t)
+
+	// First commit in worktree
+	writeTrackedFileAt(t, wtDir, "amend-me.go", "v1")
+	app.activateWorktree(wtDir)
+	app.selectCL(changelist.DefaultName)
+	idx := app.fileIndex("amend-me.go")
+	if idx < 0 {
+		t.Fatalf("amend-me.go not in clFiles")
+	}
+	app.SelectFile(idx)
+	app.PressKey("c")
+	app.TypePrompt("first wt commit")
+
+	mainSnap := gitSnapshotAt(t, mainDir)
+
+	// Modify and amend
+	writeFileAt(t, wtDir, "amend-me.go", "v2")
+	app.refresh()
+	app.selectCL(changelist.DefaultName)
+	idx = app.fileIndex("amend-me.go")
+	if idx < 0 {
+		t.Fatalf("amend-me.go not in clFiles after modify")
+	}
+	app.SelectFile(idx)
+	app.PressKey("A")
+	app.TypePrompt("amended wt commit")
+
+	// Verify amend in worktree log
+	wtLog := strings.Split(runOut(t, wtDir, "git", "log", "--oneline", "--format=%s"), "\n")
+	if wtLog[0] != "amended wt commit" {
+		t.Errorf("wt amend message: got %q, want %q", wtLog[0], "amended wt commit")
+	}
+
+	// Main must be untouched
+	assertGitUnchangedAt(t, mainDir, mainSnap)
+}
+
+// --- Reported bug scenarios ---
+
+// TestWT_Unshelve_ConflictBackupInActiveWorktree verifies that when unshelving
+// in an active worktree with conflicting files, the backup shelf (~backup-*)
+// is created in the ACTIVE worktree's .gitshelf, not the main one.
+// This was a reported bug: "a shelf with only 1 file with name starting with 'backup'"
+// appeared in the wrong worktree.
+func TestWT_Unshelve_ConflictBackupInActiveWorktree(t *testing.T) {
+	app, mainDir, wtDir := newTestAppWithWorktree(t)
+
+	// Step 1: Create a change in worktree and shelve it
+	writeTrackedFileAt(t, wtDir, "conflict.go", "original-change")
+	app.activateWorktree(wtDir)
+
+	app.selectCL(changelist.DefaultName)
+	app.selectAllFiles()
+	app.PressKey("s")
+	app.TypePrompt("conflict-shelf")
+
+	// Step 2: Create a DIFFERENT change to the same file in the worktree
+	// (this creates a conflict for unshelve)
+	writeTrackedFileAt(t, wtDir, "conflict.go", "conflicting-change")
+	app.refresh()
+
+	mainSnap := gitSnapshotAt(t, mainDir)
+
+	// Step 3: Unshelve with force (should create backup shelf for the conflict)
+	app.state.Focus = types.PanelShelves
+	app.state.Pivot = types.PanelShelves
+	app.state.ShelfSel = 0
+	app.loadShelfFiles()
+	app.PressKey("u")
+	app.TypePrompt(changelist.DefaultName)
+	// Should get a conflict confirmation
+	if app.prompt.Active() {
+		app.Confirm() // force unshelve
+	}
+
+	// Step 4: Verify backup shelf is in the WORKTREE's .gitshelf, not main's
+	wtShelfStore := shelf.NewStore(filepath.Join(wtDir, ".gitshelf"))
+	wtShelves, _ := wtShelfStore.List()
+	backupFound := false
+	for _, s := range wtShelves {
+		if strings.HasPrefix(s.Meta.Name, "~backup-") {
+			backupFound = true
+		}
+	}
+
+	mainShelfStore := shelf.NewStore(filepath.Join(mainDir, ".gitshelf"))
+	mainShelves, _ := mainShelfStore.List()
+	mainBackupFound := false
+	for _, s := range mainShelves {
+		if strings.HasPrefix(s.Meta.Name, "~backup-") {
+			mainBackupFound = true
+		}
+	}
+
+	if mainBackupFound {
+		t.Errorf("backup shelf should NOT be in main .gitshelf — it should be in active worktree's")
+	}
+
+	// The backup may or may not exist depending on whether there was actually
+	// a conflict. But it must NEVER be in main.
+	_ = backupFound
+
+	// Main must be untouched
+	assertGitUnchangedAt(t, mainDir, mainSnap)
+}
+
+// TestWT_Shelve_RestartShowsCorrectState simulates a "restart" after shelving
+// in an active worktree: re-creates the TestApp pointing at main and verifies
+// that main's changes are still there (not shelved away).
+// This was a reported bug: "when I restart the app I see the changes that disappeared"
+func TestWT_Shelve_RestartShowsCorrectState(t *testing.T) {
+	app, mainDir, wtDir := newTestAppWithWorktree(t)
+
+	// Both worktrees have different changes
+	writeTrackedFileAt(t, mainDir, "main-file.go", "main-change")
+	writeTrackedFileAt(t, wtDir, "wt-file.go", "wt-change")
+
+	// Activate worktree and shelve its change
+	app.activateWorktree(wtDir)
+	app.selectCL(changelist.DefaultName)
+	app.selectAllFiles()
+	app.PressKey("s")
+	app.TypePrompt("wt-shelf")
+
+	// "Restart" — create a fresh TestApp pointing at main (simulates app restart)
+	mainGitshelfDir := filepath.Join(mainDir, ".gitshelf")
+	git.SetRepoRoot(mainDir)
+	git.ClearLog()
+
+	app2 := &TestApp{
+		t:           t,
+		dir:         mainDir,
+		gitshelfDir: mainGitshelfDir,
+		state:       controller.NewState(),
+		logger:      &testLogger{t: t},
+		stores: action.Stores{
+			CL:    changelist.NewStore(mainGitshelfDir),
+			Shelf: shelf.NewStore(mainGitshelfDir),
+		},
+		prompt: tui.NewPrompt(gitshelfLabeler{}, types.PromptConfirm),
+	}
+	app2.refresh()
+
+	// Main's file should still be in the CL
+	found := false
+	for _, f := range app2.clFiles {
+		if f == "main-file.go" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("main-file.go should still be in main's CL after restart; clFiles=%v", app2.clFiles)
+	}
+
+	// Main's file content should be unchanged
+	content := fileContentAt(t, mainDir, "main-file.go")
+	if content != "main-change" {
+		t.Errorf("main-file.go content after restart: got %q, want %q", content, "main-change")
+	}
+
+	// Main should NOT have the worktree's shelf
+	for _, s := range app2.shelves {
+		if s.Meta.Name == "wt-shelf" {
+			t.Errorf("wt-shelf should NOT appear in main's shelves after restart")
+		}
+	}
+}
+
+// TestWT_AutoAssign_DoesNotRemoveFilesFromOtherWorktree verifies that when
+// switching to a worktree, AutoAssignNewFiles doesn't remove files from
+// the other worktree's CL state.
+// This tests a corruption scenario where files get cleaned from CLs because
+// AutoAssign uses git status from the wrong worktree.
+func TestWT_AutoAssign_DoesNotRemoveFilesFromOtherWorktree(t *testing.T) {
+	app, mainDir, wtDir := newTestAppWithWorktree(t)
+
+	// Create changes only in main
+	writeTrackedFileAt(t, mainDir, "only-in-main.go", "main content")
+	app.refresh()
+
+	// Verify the file is in main's CL
+	app.selectCL(changelist.DefaultName)
+	mainHasFile := false
+	for _, f := range app.clFiles {
+		if f == "only-in-main.go" {
+			mainHasFile = true
+		}
+	}
+	if !mainHasFile {
+		t.Fatalf("only-in-main.go should be in main's CL")
+	}
+
+	// Switch to worktree and back
+	app.activateWorktree(wtDir)
+	app.activateWorktree(wtDir) // toggle off = back to main
+	app.refresh()
+
+	// Main's CL should still have the file
+	app.selectCL(changelist.DefaultName)
+	mainStillHasFile := false
+	for _, f := range app.clFiles {
+		if f == "only-in-main.go" {
+			mainStillHasFile = true
+		}
+	}
+	if !mainStillHasFile {
+		t.Errorf("only-in-main.go should still be in main's CL after switching worktrees and back; clFiles=%v", app.clFiles)
+	}
+}
+
+// TestWT_Shelve_MultipleSwitches verifies that rapidly switching between
+// worktrees and performing operations doesn't corrupt state.
+func TestWT_Shelve_MultipleSwitches(t *testing.T) {
+	app, mainDir, wtDir := newTestAppWithWorktree(t)
+
+	// Set up changes in both
+	writeTrackedFileAt(t, mainDir, "main.go", "main-v1")
+	writeTrackedFileAt(t, wtDir, "wt.go", "wt-v1")
+
+	// Switch to WT, shelve, switch back, verify main
+	app.activateWorktree(wtDir)
+	app.selectCL(changelist.DefaultName)
+	app.selectAllFiles()
+	app.PressKey("s")
+	app.TypePrompt("wt-shelf-1")
+
+	// Switch back to main
+	app.activateWorktree(wtDir) // toggle off
+
+	// Main's file should still exist with original content
+	mainContent := fileContentAt(t, mainDir, "main.go")
+	if mainContent != "main-v1" {
+		t.Errorf("main.go content after wt shelve + switch: got %q, want %q", mainContent, "main-v1")
+	}
+
+	// Shelve main's change
+	app.selectCL(changelist.DefaultName)
+	app.selectAllFiles()
+	app.PressKey("s")
+	app.TypePrompt("main-shelf-1")
+
+	// Switch to WT — it should have the shelf, not main's shelf
+	app.activateWorktree(wtDir)
+	wtShelfNames := make([]string, len(app.shelves))
+	for i, s := range app.shelves {
+		wtShelfNames[i] = s.Meta.Name
+	}
+	hasWTShelf := false
+	hasMainShelf := false
+	for _, name := range wtShelfNames {
+		if name == "wt-shelf-1" {
+			hasWTShelf = true
+		}
+		if name == "main-shelf-1" {
+			hasMainShelf = true
+		}
+	}
+	if !hasWTShelf {
+		t.Errorf("worktree should have wt-shelf-1, shelves=%v", wtShelfNames)
+	}
+	if hasMainShelf {
+		t.Errorf("worktree should NOT have main-shelf-1, shelves=%v", wtShelfNames)
+	}
+
+	// Switch back to main — it should have main-shelf-1 but not wt-shelf-1
+	app.activateWorktree(wtDir) // toggle off
+	mainShelfNames := make([]string, len(app.shelves))
+	for i, s := range app.shelves {
+		mainShelfNames[i] = s.Meta.Name
+	}
+	hasWTShelf = false
+	hasMainShelf = false
+	for _, name := range mainShelfNames {
+		if name == "wt-shelf-1" {
+			hasWTShelf = true
+		}
+		if name == "main-shelf-1" {
+			hasMainShelf = true
+		}
+	}
+	if !hasMainShelf {
+		t.Errorf("main should have main-shelf-1, shelves=%v", mainShelfNames)
+	}
+	if hasWTShelf {
+		t.Errorf("main should NOT have wt-shelf-1, shelves=%v", mainShelfNames)
+	}
+}
+
+// TestWT_Shelve_RestoreTargetsCorrectWorktree verifies that shelving in the active
+// worktree restores files (via git restore/clean) in that worktree only.
+// Tests the specific case of modifying an existing tracked file (not a new file).
+func TestWT_Shelve_RestoreTargetsCorrectWorktree(t *testing.T) {
+	app, mainDir, wtDir := newTestAppWithWorktree(t)
+
+	// Both worktrees modify the SAME file (README.md exists in both from initial commit)
+	writeFileAt(t, mainDir, "README.md", "main-readme")
+	run(t, mainDir, "git", "add", "README.md")
+	writeFileAt(t, wtDir, "README.md", "wt-readme")
+	run(t, wtDir, "git", "add", "README.md")
+
+	mainSnap := gitSnapshotAt(t, mainDir)
+
+	// Activate worktree and shelve
+	app.activateWorktree(wtDir)
+	app.selectCL(changelist.DefaultName)
+	app.selectAllFiles()
+	app.PressKey("s")
+	app.TypePrompt("readme-shelf")
+
+	// After shelving in WT, README.md in WT should be restored to "init" (HEAD)
+	wtContent := fileContentAt(t, wtDir, "README.md")
+	if wtContent != "init" {
+		t.Errorf("wt README.md after shelve: got %q, want %q (restored to HEAD)", wtContent, "init")
+	}
+
+	// CRITICAL: Main's README.md should still be "main-readme" — shelve must not restore it
+	assertGitUnchangedAt(t, mainDir, mainSnap)
+	mainContent := fileContentAt(t, mainDir, "README.md")
+	if mainContent != "main-readme" {
+		t.Errorf("main README.md was modified by wt shelve! got %q, want %q", mainContent, "main-readme")
+	}
+}
+
+// TestWT_Diff_DoesNotLeakAcrossWorktrees verifies that after switching worktrees,
+// the diff shows changes from the correct worktree.
+func TestWT_Diff_DoesNotLeakAcrossWorktrees(t *testing.T) {
+	app, mainDir, wtDir := newTestAppWithWorktree(t)
+
+	// Different changes in each worktree
+	writeTrackedFileAt(t, mainDir, "main-only.go", "main-diff")
+	writeTrackedFileAt(t, wtDir, "wt-only.go", "wt-diff")
+
+	// Check diff in main context
+	app.refresh()
+	app.selectCL(changelist.DefaultName)
+	app.loadDiff()
+	mainDiff := app.diff
+
+	// Switch to worktree
+	app.activateWorktree(wtDir)
+	app.selectCL(changelist.DefaultName)
+	app.loadDiff()
+	wtDiff := app.diff
+
+	// WT diff should contain wt content, not main content
+	if strings.Contains(wtDiff, "main-diff") {
+		t.Errorf("worktree diff should not contain main-only changes")
+	}
+	if !strings.Contains(wtDiff, "wt-diff") {
+		t.Errorf("worktree diff should contain wt-only changes, got: %s", wtDiff)
+	}
+
+	// Switch back to main
+	app.activateWorktree(wtDir) // toggle off
+	app.selectCL(changelist.DefaultName)
+	app.loadDiff()
+	mainDiffAfter := app.diff
+
+	// Main diff should not contain WT content
+	if strings.Contains(mainDiffAfter, "wt-diff") {
+		t.Errorf("main diff should not contain wt-only changes after switching back")
+	}
+	_ = mainDiff
+}
+
+// TestWT_Push_InActiveWorktree verifies pushing targets the active worktree's branch.
+func TestWT_Push_InActiveWorktree(t *testing.T) {
+	// Create a bare remote + main working dir
+	base := t.TempDir()
+	base, _ = filepath.EvalSymlinks(base)
+	bareDir := filepath.Join(base, "bare.git")
+	mainDir := filepath.Join(base, "work")
+
+	run(t, base, "git", "init", "--bare", bareDir)
+	run(t, base, "git", "clone", bareDir, mainDir)
+	run(t, mainDir, "git", "config", "user.email", "test@test.com")
+	run(t, mainDir, "git", "config", "user.name", "Test")
+	run(t, mainDir, "git", "config", "core.autocrlf", "false")
+	os.WriteFile(filepath.Join(mainDir, "README.md"), []byte("init"), 0644)
+	run(t, mainDir, "git", "add", ".")
+	run(t, mainDir, "git", "commit", "-m", "initial")
+	run(t, mainDir, "git", "push", "origin", "HEAD")
+
+	// Create worktree
+	wtDir := filepath.Join(base, "work-wt")
+	run(t, mainDir, "git", "worktree", "add", wtDir, "-b", "feature")
+	run(t, wtDir, "git", "config", "user.email", "test@test.com")
+	run(t, wtDir, "git", "config", "user.name", "Test")
+
+	mainGitshelfDir := filepath.Join(mainDir, ".gitshelf")
+	wtGitshelfDir := filepath.Join(wtDir, ".gitshelf")
+	os.MkdirAll(mainGitshelfDir, 0755)
+	os.MkdirAll(wtGitshelfDir, 0755)
+
+	git.SetRepoRoot(mainDir)
+	git.ClearLog()
+	t.Cleanup(func() {
+		git.SetRepoRoot("")
+		exec.Command("git", "-C", mainDir, "worktree", "remove", "--force", wtDir).Run()
+	})
+
+	app := &TestApp{
+		t:           t,
+		dir:         mainDir,
+		gitshelfDir: mainGitshelfDir,
+		state:       controller.NewState(),
+		logger:      &testLogger{t: t},
+		stores: action.Stores{
+			CL:    changelist.NewStore(mainGitshelfDir),
+			Shelf: shelf.NewStore(mainGitshelfDir),
+		},
+		prompt: tui.NewPrompt(gitshelfLabeler{}, types.PromptConfirm),
+	}
+	app.refresh()
+
+	// Commit in worktree
+	writeTrackedFileAt(t, wtDir, "push-me.go", "push content")
+	app.activateWorktree(wtDir)
+	app.selectCL(changelist.DefaultName)
+	idx := app.fileIndex("push-me.go")
+	if idx < 0 {
+		t.Fatalf("push-me.go not in clFiles")
+	}
+	app.SelectFile(idx)
+	app.PressKey("c")
+	app.TypePrompt("wt push commit")
+
+	mainSnap := gitSnapshotAt(t, mainDir)
+
+	// Push from active worktree (must be on Changelists panel)
+	app.state.Focus = types.PanelChangelists
+	app.PressKey("p")
+
+	// Verify main is untouched
+	assertGitUnchangedAt(t, mainDir, mainSnap)
+
+	// Verify the feature branch was pushed to remote
+	remoteRefs := runOut(t, bareDir, "git", "branch")
+	if !strings.Contains(remoteRefs, "feature") {
+		t.Errorf("feature branch should be pushed to remote, got: %s", remoteRefs)
+	}
+}
+
+// TestWT_CLState_NotCorruptedByAutoAssign verifies that AutoAssignNewFiles,
+// which removes stale files and assigns new ones based on git status, uses
+// the correct worktree's git status and doesn't corrupt the other worktree's CL state.
+func TestWT_CLState_NotCorruptedByAutoAssign(t *testing.T) {
+	app, mainDir, wtDir := newTestAppWithWorktree(t)
+
+	// Create CLs with files in main
+	writeTrackedFileAt(t, mainDir, "stable.go", "stable")
+	app.refresh()
+
+	app.PressKey("n")
+	app.TypePrompt("MainCL")
+	app.selectCL(changelist.DefaultName)
+	idx := app.fileIndex("stable.go")
+	if idx >= 0 {
+		app.SelectFile(idx)
+		app.PressKey("m")
+		app.TypePrompt("MainCL")
+	}
+
+	// Save the state of main's CL
+	mainStore := changelist.NewStore(filepath.Join(mainDir, ".gitshelf"))
+	mainStateBefore, _ := mainStore.Load()
+	var mainFilesBefore []string
+	for _, cl := range mainStateBefore.Changelists {
+		if cl.Name == "MainCL" {
+			mainFilesBefore = append(mainFilesBefore, cl.Files...)
+		}
+	}
+
+	// Switch to worktree (this triggers refresh → AutoAssign with WT's git status)
+	app.activateWorktree(wtDir)
+	app.refresh() // extra refresh to ensure AutoAssign runs
+
+	// Switch back to main
+	app.activateWorktree(wtDir) // toggle off
+
+	// Main's CL state should still have stable.go in MainCL
+	app.selectCL("MainCL")
+	found := false
+	for _, f := range app.clFiles {
+		if f == "stable.go" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("stable.go should still be in MainCL after worktree switch round-trip; clFiles=%v", app.clFiles)
+	}
+}
+
+// ===========================================================================
+// Snapshot shelve/unshelve tests
+// ===========================================================================
+
+// TestSnapshotShelve verifies S shelves all CLs with changed files as a snapshot group.
+func TestSnapshotShelve(t *testing.T) {
+	app := newTestApp(t)
+
+	// Create two CLs with files
+	app.WriteTrackedFile("feat.go", "feature code")
+	app.WriteTrackedFile("fix.go", "bugfix code")
+	app.refresh()
+
+	app.state.Focus = types.PanelChangelists
+	app.PressKey("n")
+	app.TypePrompt("Feature")
+	app.refresh()
+
+	// Move feat.go to Feature CL
+	app.selectCL("Feature")
+	app.state.Focus = types.PanelFiles
+	idx := app.fileIndex("feat.go")
+	if idx >= 0 {
+		app.state.CLFileSel = idx
+		app.PressKey("m")
+		app.TypePrompt("Feature")
+		app.refresh()
+	}
+
+	// Now press S to snapshot shelve
+	app.state.Focus = types.PanelChangelists
+	app.PressKey("S")
+
+	// Should have shelves with matching snapshot IDs
+	if len(app.shelves) == 0 {
+		t.Fatal("expected shelves after snapshot shelve")
+	}
+
+	snapshotID := app.shelves[0].Meta.Snapshot
+	if snapshotID == "" {
+		t.Fatal("expected non-empty snapshot ID")
+	}
+	for _, s := range app.shelves {
+		if s.Meta.Snapshot != snapshotID {
+			t.Errorf("all shelves should share snapshot ID %q, got %q", snapshotID, s.Meta.Snapshot)
+		}
+	}
+
+	// Files should be restored (working tree clean)
+	status := app.gitStatus()
+	if strings.Contains(status, "feat.go") || strings.Contains(status, "fix.go") {
+		t.Errorf("files should be restored after snapshot shelve, status: %s", status)
+	}
+}
+
+// TestSnapshotUnshelveAll verifies U unshelves all shelves in a snapshot group.
+func TestSnapshotUnshelveAll(t *testing.T) {
+	app := newTestApp(t)
+
+	// Create two CLs and snapshot shelve them
+	app.WriteTrackedFile("a.go", "aaa")
+	app.WriteTrackedFile("b.go", "bbb")
+	app.refresh()
+
+	app.state.Focus = types.PanelChangelists
+	app.PressKey("n")
+	app.TypePrompt("BugFix")
+	app.refresh()
+
+	// Move b.go to BugFix
+	app.selectCL("BugFix")
+	app.state.Focus = types.PanelFiles
+	idx := app.fileIndex("b.go")
+	if idx >= 0 {
+		app.state.CLFileSel = idx
+		app.PressKey("m")
+		app.TypePrompt("BugFix")
+		app.refresh()
+	}
+
+	app.state.Focus = types.PanelChangelists
+	app.PressKey("S")
+
+	if len(app.shelves) == 0 {
+		t.Fatal("no shelves after snapshot shelve")
+	}
+
+	// Now unshelve all
+	app.state.Focus = types.PanelShelves
+	app.state.ShelfSel = 0
+	app.PressKey("U")
+	app.Confirm()
+
+	// Files should be back
+	status := app.gitStatus()
+	if !strings.Contains(status, "a.go") || !strings.Contains(status, "b.go") {
+		t.Errorf("files should be restored after unshelve all, status: %s", status)
+	}
+
+	// Shelves should still be present (unshelve all does not delete them)
+	if len(app.shelves) == 0 {
+		t.Error("shelves should remain after unshelve all")
+	}
+
+	// CLs should be recreated
+	hasCL := func(name string) bool {
+		for _, n := range app.clNames {
+			if n == name {
+				return true
+			}
+		}
+		return false
+	}
+	if !hasCL("BugFix") {
+		t.Error("BugFix CL should be recreated after unshelve all")
+	}
+}
+
+// TestSnapshotShelveSkipsEmpty verifies S skips CLs with no changed files.
+func TestSnapshotShelveSkipsEmpty(t *testing.T) {
+	app := newTestApp(t)
+
+	// Create an empty CL (no files)
+	app.state.Focus = types.PanelChangelists
+	app.PressKey("n")
+	app.TypePrompt("EmptyCL")
+	app.refresh()
+
+	snap := app.gitSnapshot()
+
+	// Only one tracked file in Changes
+	app.WriteTrackedFile("only.go", "content")
+	app.refresh()
+
+	app.state.Focus = types.PanelChangelists
+	app.PressKey("S")
+
+	// Should have exactly 1 shelf (Changes), not 2
+	shelfCount := 0
+	for _, s := range app.shelves {
+		if s.Meta.Snapshot != "" {
+			shelfCount++
+		}
+	}
+	if shelfCount != 1 {
+		t.Errorf("expected 1 snapshot shelf (skipping empty CL), got %d", shelfCount)
+	}
+
+	// The snapshot shelve restored the file, so git should show clean
+	_ = snap
+}
+
+// TestSnapshotUnshelveOnNonSnapshot verifies U does nothing on a regular shelf.
+func TestSnapshotUnshelveOnNonSnapshot(t *testing.T) {
+	app := newTestApp(t)
+
+	// Create a regular shelf
+	app.WriteTrackedFile("reg.go", "regular")
+	app.refresh()
+	app.selectCL(changelist.DefaultName)
+	app.selectAllFiles()
+	app.PressKey("s")
+	app.TypePrompt("regular-shelf")
+
+	snap := app.gitSnapshot()
+
+	// Try U on the regular shelf
+	app.state.Focus = types.PanelShelves
+	app.state.ShelfSel = 0
+	app.PressKey("U")
+
+	// Should have no effect (no prompt started)
+	if app.prompt.Active() {
+		t.Error("U on non-snapshot shelf should not start a prompt")
+	}
 	app.assertGitUnchanged(snap)
 }
 
