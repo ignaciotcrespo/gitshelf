@@ -79,7 +79,7 @@ Save changes for later without committing. Browse shelf contents and diffs befor
 
 If you use [git worktrees](https://git-scm.com/docs/git-worktree), gitshelf lets you manage all of them from wherever you launched it. Press `6` to open the Worktrees panel, then navigate with arrow keys — the changelists, shelves, files, and diffs update automatically as you move between worktrees.
 
-Each worktree has its own independent `.gitshelf/` directory, so changelists and shelves are completely isolated. You never have to worry about one worktree's organization leaking into another.
+Each worktree has its own independent `.gitshelf/` directory, so changelists and shelves are completely isolated.
 
 **What you can do:**
 
@@ -88,6 +88,67 @@ Each worktree has its own independent `.gitshelf/` directory, so changelists and
   - **Full content** — copies the actual file contents from the source worktree
   - **Apply diff** — generates a patch from the source and applies it
   - **Only changelist** — just creates the changelist grouping without modifying files (useful when both worktrees already have the same files changed)
+
+**Example: copying a changelist between worktrees**
+
+You're working on a feature in the `main` worktree and realize some of the changes belong in your `hotfix` worktree:
+
+```
+ ┌ Changelists ──┐ ┌ Files ─────────┐
+ │ ▸ Changes     │ │   main.go      │     1. Select the changelist
+ │   Bug fix  ◄──┼─┼── W to copy    │     2. Press W to copy it
+ │               │ │                │
+ ├───────────────┤ │                │
+ │ Shelves       │ │                │
+ │               │ │                │
+ ├───────────────┤ │                │
+ │ Worktrees     │ │                │
+ │   main ●      │ │                │
+ │ ▸ hotfix ◄────┼─┼── navigate     │     3. Move to the hotfix worktree
+ └───────────────┘ └────────────────┘
+
+ ┌ Changelists ──┐ ┌ Files ─────────┐
+ │ ▸ Changes     │ │   config.go    │     4. Press V to paste
+ │   Bug fix  ◄──┼─┼── V to paste   │     5. Choose a paste mode
+ │               │ │                │
+ └───────────────┘ └────────────────┘
+```
+
+### Snapshot shelve & unshelve
+
+When you need to save everything at once — switching context, going to a meeting, or just want a checkpoint — press `S` on the Changelists panel. This shelves every changelist with changed files in one go, creating a grouped snapshot:
+
+```
+ Before S                          After S
+ ┌ Changelists ──┐                 ┌ Changelists ──┐
+ │ ▸ Changes     │  3 files        │ ▸ Changes     │  no files
+ │   Feature     │  2 files        │   Feature     │  no files
+ │   Refactor    │  1 file         │   Refactor    │  no files
+ ├───────────────┤                 ├───────────────┤
+ │ Shelves       │                 │ Shelves       │
+ │               │                 │ ┌ Changes     │  ─┐
+ │               │                 │ ├ Feature     │   ├ snapshot group
+ │               │                 │ └ Refactor    │  ─┘
+ └───────────────┘                 └───────────────┘
+```
+
+The `┌├└` markers show which shelves belong together. To restore them all, select any shelf in the group and press `U`:
+
+```
+ Before U                          After U
+ ┌ Changelists ──┐                 ┌ Changelists ──┐
+ │ ▸ Changes     │  no files       │ ▸ Changes     │  3 files
+ │   Feature     │  no files       │   Feature     │  2 files
+ │   Refactor    │  no files       │   Refactor    │  1 file
+ ├───────────────┤                 ├───────────────┤
+ │ Shelves       │                 │ Shelves       │
+ │ ┌ Changes     │  ─┐             │ ┌ Changes     │  ─┐ kept
+ │ ├ Feature     │   ├ select any  │ ├ Feature     │   ├ for
+ │ └ Refactor    │  ─┘ press U     │ └ Refactor    │  ─┘ safety
+ └───────────────┘                 └───────────────┘
+```
+
+The shelves are kept after unshelving — drop them manually with `d` when you're sure you don't need them anymore.
 
 ### Panels
 
