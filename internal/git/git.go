@@ -502,7 +502,7 @@ func WorktreeList(launchPath string) ([]Worktree, error) {
 			if current.Path != "" {
 				worktrees = append(worktrees, current)
 			}
-			current = Worktree{Path: strings.TrimPrefix(line, "worktree ")}
+			current = Worktree{Path: filepath.Clean(strings.TrimPrefix(line, "worktree "))}
 		case strings.HasPrefix(line, "HEAD "):
 			commit := strings.TrimPrefix(line, "HEAD ")
 			if len(commit) > 7 {
