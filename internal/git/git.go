@@ -184,6 +184,12 @@ func DiffFile(file string) (string, error) {
 	if err == nil && out != "" {
 		return out, nil
 	}
+	// Try staged changes (git diff HEAD) — covers files that are staged but
+	// have no unstaged modifications, where plain "git diff" returns empty.
+	staged, _ := query("diff", "HEAD", "--", file)
+	if staged != "" {
+		return staged, nil
+	}
 	// No diff output — file may be untracked. Use --no-index against /dev/null.
 	// Since all commands run from repo root, the relative path works directly.
 	noIndex, _ := queryIgnoreExit("diff", "--no-index", "--", "/dev/null", file)
