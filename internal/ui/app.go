@@ -161,6 +161,14 @@ func NewModel(gitshelfDir, version string) Model {
 		m.state.WorktreeState = types.PanelNormal
 	}
 
+	// Point selection at the launch worktree (green dot)
+	for i, wt := range m.worktrees {
+		if wt.IsCurrent {
+			m.state.WorktreeSel = i
+			break
+		}
+	}
+
 	return m
 }
 

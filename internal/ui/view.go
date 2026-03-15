@@ -134,7 +134,11 @@ func (m Model) View() string {
 	} else {
 		filesPC = m.renderFilesContent(m.shelfFiles, m.state.ShelfFileSel, filesMaxLines)
 	}
-	middle := panel.Box(3, "Files", filesPC.content, middleW, contentH, filesFocused, panel.BoxOpts{Scroll: filesPC.scroll, Accent: panelAccent(filesFocused)})
+	filesTitle := "Files"
+	if !isCL {
+		filesTitle = "Shelved Files"
+	}
+	middle := panel.Box(3, filesTitle, filesPC.content, middleW, contentH, filesFocused, panel.BoxOpts{Scroll: filesPC.scroll, Accent: panelAccent(filesFocused)})
 
 	var topPanels string
 	if m.state.DiffState == types.PanelHidden {
