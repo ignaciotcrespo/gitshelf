@@ -3736,7 +3736,8 @@ func TestWT_Push_InActiveWorktree(t *testing.T) {
 
 	mainSnap := gitSnapshotAt(t, mainDir)
 
-	// Push from active worktree
+	// Push from active worktree (must be on Changelists panel)
+	app.state.Focus = types.PanelChangelists
 	app.PressKey("p")
 
 	// Verify main is untouched

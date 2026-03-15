@@ -56,9 +56,6 @@ var CLFileBindings = []KeyBinding{
 	{Key: "A", Display: "A", Short: "amend", Desc: "Amend last commit with selected files"},
 	{Key: "s", Display: "s", Short: "shelve", Desc: "Shelve selected files"},
 	{Key: "m", Display: "m", Short: "move", Desc: "Move file(s) to another changelist"},
-	{Key: "p", Display: "p", Short: "push", Desc: "Push to remote"},
-	{Key: "P", Display: "P", Short: "pull", Desc: "Pull from remote"},
-	{Key: "B", Display: "B", Short: "accept", Desc: "Accept dirty changes as new baseline"},
 	{Key: "y", Display: "y", Short: "copy patch", Desc: "Copy selected file(s) diff as patch to clipboard"},
 }
 

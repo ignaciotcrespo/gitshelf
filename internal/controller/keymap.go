@@ -314,10 +314,14 @@ func handleChangelistKey(key string, r KeyResult, ctx KeyContext) KeyResult {
 		}
 
 	case "p":
-		r.StartPrompt, r.RunRemote = buildRemoteAction(types.PromptPush, ctx.Remotes)
+		if r.State.Focus == types.PanelChangelists {
+			r.StartPrompt, r.RunRemote = buildRemoteAction(types.PromptPush, ctx.Remotes)
+		}
 
 	case "P":
-		r.StartPrompt, r.RunRemote = buildRemoteAction(types.PromptPull, ctx.Remotes)
+		if r.State.Focus == types.PanelChangelists {
+			r.StartPrompt, r.RunRemote = buildRemoteAction(types.PromptPull, ctx.Remotes)
+		}
 
 	case "B":
 		if r.State.Focus == types.PanelChangelists && ctx.CLCount > 0 {

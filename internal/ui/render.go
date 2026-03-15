@@ -411,12 +411,13 @@ func (m Model) renderHelp() string {
 }
 
 // buildFooter renders a help footer with optional "B accept" in warning style.
+// When showDirtyWarning is false, "B accept" is hidden entirely.
 func (m Model) buildFooter(bindings []controller.KeyBinding, showDirtyWarning bool, suffix string) string {
 	if showDirtyWarning {
 		text := controller.FooterText(bindings, map[string]bool{"B": true})
 		return helpStyle.Render(" "+text+" · ") + warningStyle.Render("B accept") + helpStyle.Render(suffix)
 	}
-	return helpStyle.Render(" " + controller.FooterText(bindings, nil) + suffix)
+	return helpStyle.Render(" " + controller.FooterText(bindings, map[string]bool{"B": true}) + suffix)
 }
 
 func (m Model) renderHelpScreen() string {

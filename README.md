@@ -26,6 +26,7 @@ IDEs like IntelliJ solve this with **changelists** — logical groups that let y
 - **Dirty detection** — Know when files changed since you last looked at a changelist.
 - **Push & pull** — Without leaving the TUI.
 - **Full diff viewer** — Syntax-highlighted, scrollable, with word wrap toggle.
+- **Worktree support** — Browse and manage changelists, shelves, and files across all your worktrees from a single instance.
 - **Git log** — Every git command the app runs is visible. Nothing hidden.
 
 ## Install
@@ -58,7 +59,7 @@ That's it. The app detects the repo root automatically.
 
 ### Layout
 
-Five panels: **Changelists** and **Shelves** stacked on the left, **Files** in the center, **Diff** on the right, and **Git Log** spanning the full width at the bottom.
+Six panels: **Changelists**, **Shelves**, and **Worktrees** stacked on the left, **Files** in the center, **Diff** on the right, and **Git Log** spanning the full width at the bottom.
 
 ![Main view — changelists, files, and syntax-highlighted diff](docs/screenshots/screenshot1.png)
 
@@ -74,9 +75,23 @@ Save changes for later without committing. Browse shelf contents and diffs befor
 
 ![Shelves — named stashes with browsable diffs](docs/screenshots/screenshot3.png)
 
+### Worktrees
+
+If you use [git worktrees](https://git-scm.com/docs/git-worktree), gitshelf lets you manage all of them from wherever you launched it. Press `6` to open the Worktrees panel, then navigate with arrow keys — the changelists, shelves, files, and diffs update automatically as you move between worktrees.
+
+Each worktree has its own independent `.gitshelf/` directory, so changelists and shelves are completely isolated. You never have to worry about one worktree's organization leaking into another.
+
+**What you can do:**
+
+- **Manage changelists and shelves per worktree.** Navigate to any worktree and see its changelists, shelves, and uncommitted files — all without leaving the app or `cd`-ing between directories.
+- **Copy changelists between worktrees.** Press `W` to copy a changelist, navigate to another worktree, press `V` to paste. Three paste modes:
+  - **Full content** — copies the actual file contents from the source worktree
+  - **Apply diff** — generates a patch from the source and applies it
+  - **Only changelist** — just creates the changelist grouping without modifying files (useful when both worktrees already have the same files changed)
+
 ### Panels
 
-The UI has five panels, accessible by number keys:
+The UI has six panels, accessible by number keys:
 
 | # | Panel | Shows |
 |---|-------|-------|
@@ -85,69 +100,15 @@ The UI has five panels, accessible by number keys:
 | 3 | Files | Files in the selected changelist or shelf |
 | 4 | Diff | Diff of the selected file |
 | 5 | Git Log | Every git command the app executed |
+| 6 | Worktrees | All worktrees — navigate to browse their changelists and shelves |
 
-Press `4` or `5` to cycle a panel through normal → maximized → hidden.
+Press `4` or `5` to cycle a panel through normal → maximized → hidden. Press `6` to toggle the Worktrees panel between normal and minimized.
 
 ### Keyboard shortcuts
 
-**Navigation**
+See [docs/keybindings.md](docs/keybindings.md) for the full list. Press `?` in the app for an in-app reference.
 
-| Key | Action |
-|-----|--------|
-| `1`-`5` | Jump to panel |
-| `tab` / `shift+tab` | Cycle between panels |
-| `j` / `k` or `↑` / `↓` | Move cursor |
-| `h` / `l` or `←` / `→` | Scroll diff horizontally |
-| `w` | Toggle diff word wrap |
-| `enter` | Drill into files / diff |
-| `q` | Quit |
-
-**Changelists** (panel 1)
-
-| Key | Action |
-|-----|--------|
-| `n` | New changelist |
-| `r` | Rename changelist |
-| `d` | Delete changelist |
-| `a` | Set as active (new changes go here) |
-| `s` | Shelve all files in changelist |
-| `B` | Accept dirty changes as new baseline |
-| `y` | Copy changelist diff as patch to clipboard |
-
-**Files** (panel 3)
-
-| Key | Action |
-|-----|--------|
-| `space` | Toggle file selection |
-| `a` | Select all |
-| `x` | Deselect all |
-| `c` | Commit selected files |
-| `A` | Amend last commit with selected files |
-| `s` | Shelve selected files |
-| `m` | Move file(s) to another changelist |
-| `y` | Copy selected file(s) diff as patch to clipboard |
-
-**Shelves** (panel 2)
-
-| Key | Action |
-|-----|--------|
-| `u` | Unshelve (restore changes to working tree) |
-| `r` | Rename shelf |
-| `d` | Drop shelf |
-| `y` | Copy shelf patch to clipboard |
-
-**Diff** (panel 4)
-
-| Key | Action |
-|-----|--------|
-| `y` | Copy visible diff to clipboard |
-
-**Remote**
-
-| Key | Action |
-|-----|--------|
-| `p` | Push |
-| `P` | Pull |
+Quick overview: `n` new changelist, `space` select files, `c` commit, `s` shelve, `m` move files, `p`/`P` push/pull, `y` copy patch.
 
 ## Not a git client
 
