@@ -3987,6 +3987,272 @@ func TestSnapshotUnshelveOnNonSnapshot(t *testing.T) {
 }
 
 // ===========================================================================
+// Snapshot shelve/unshelve with untracked files
+// ===========================================================================
+
+// TestSnapshotShelve_IncludesUntracked verifies S shelves untracked files from
+// the "Unversioned Files" CL as part of the snapshot.
+func TestSnapshotShelve_IncludesUntracked(t *testing.T) {
+	app := newTestApp(t)
+
+	// Create tracked and untracked files
+	app.WriteTrackedFile("tracked.go", "tracked content")
+	app.WriteFile("untracked.go", "untracked content")
+	app.refresh()
+
+	// Verify untracked file is in Unversioned Files
+	app.selectCL(changelist.UnversionedName)
+	if app.fileIndex("untracked.go") < 0 {
+		t.Fatal("untracked.go should be in Unversioned Files")
+	}
+
+	// Snapshot shelve
+	app.state.Focus = types.PanelChangelists
+	app.PressKey("S")
+
+	// Both files should be gone from working tree
+	status := app.gitStatus()
+	if strings.Contains(status, "tracked.go") {
+		t.Errorf("tracked.go should be gone after snapshot shelve, status: %s", status)
+	}
+	if strings.Contains(status, "untracked.go") {
+		t.Errorf("untracked.go should be gone after snapshot shelve, status: %s", status)
+	}
+
+	// Should have shelves for both Changes and Unversioned Files
+	if len(app.shelves) < 2 {
+		t.Fatalf("expected at least 2 shelves (tracked + untracked), got %d", len(app.shelves))
+	}
+
+	// All should share the same snapshot ID
+	snapshotID := app.shelves[0].Meta.Snapshot
+	for _, s := range app.shelves {
+		if s.Meta.Snapshot != snapshotID {
+			t.Errorf("all shelves should share snapshot ID %q, got %q", snapshotID, s.Meta.Snapshot)
+		}
+	}
+
+	// One shelf should contain untracked.go
+	foundUntracked := false
+	for _, s := range app.shelves {
+		for _, f := range s.Meta.Files {
+			if f == "untracked.go" {
+				foundUntracked = true
+			}
+		}
+	}
+	if !foundUntracked {
+		t.Error("no shelf contains untracked.go")
+	}
+}
+
+// TestSnapshotUnshelve_RestoresUntrackedAsUntracked verifies U restores
+// previously-untracked files as untracked (not staged).
+func TestSnapshotUnshelve_RestoresUntrackedAsUntracked(t *testing.T) {
+	app := newTestApp(t)
+
+	// Create tracked and untracked files
+	app.WriteTrackedFile("tracked.go", "tracked content")
+	app.WriteFile("untracked.go", "untracked content")
+	app.refresh()
+
+	// Snapshot shelve
+	app.state.Focus = types.PanelChangelists
+	app.PressKey("S")
+
+	// Unshelve all
+	app.state.Focus = types.PanelShelves
+	app.state.ShelfSel = 0
+	app.PressKey("U")
+	app.Confirm()
+
+	// Both files should be back
+	status := app.gitStatus()
+	if !strings.Contains(status, "tracked.go") {
+		t.Errorf("tracked.go should be restored, status: %s", status)
+	}
+	if !strings.Contains(status, "untracked.go") {
+		t.Errorf("untracked.go should be restored, status: %s", status)
+	}
+
+	// Verify content
+	if c := app.fileContent("tracked.go"); c != "tracked content" {
+		t.Errorf("tracked.go content = %q, want %q", c, "tracked content")
+	}
+	if c := app.fileContent("untracked.go"); c != "untracked content" {
+		t.Errorf("untracked.go content = %q, want %q", c, "untracked content")
+	}
+
+	// The untracked file must be untracked again (not staged)
+	// git status --porcelain: "?? untracked.go" for untracked, "A  untracked.go" for staged
+	if !strings.Contains(status, "?? untracked.go") {
+		t.Errorf("untracked.go should be untracked (??) after unshelve, status: %s", status)
+	}
+}
+
+// TestSnapshotShelve_OnlyUntracked verifies S works when there are only
+// untracked files and no tracked changes.
+func TestSnapshotShelve_OnlyUntracked(t *testing.T) {
+	app := newTestApp(t)
+
+	// Create only untracked files
+	app.WriteFile("new1.txt", "content1")
+	app.WriteFile("new2.txt", "content2")
+	app.refresh()
+
+	// Snapshot shelve
+	app.state.Focus = types.PanelChangelists
+	app.PressKey("S")
+
+	// Files should be gone
+	status := app.gitStatus()
+	if strings.Contains(status, "new1.txt") || strings.Contains(status, "new2.txt") {
+		t.Errorf("untracked files should be gone after snapshot shelve, status: %s", status)
+	}
+
+	// Should have at least one shelf
+	if len(app.shelves) == 0 {
+		t.Fatal("expected shelves for untracked files")
+	}
+}
+
+// TestSnapshotUnshelve_MixedTrackedUntracked verifies correct restoration
+// when a snapshot contains both tracked CLs and the Unversioned Files CL.
+func TestSnapshotUnshelve_MixedTrackedUntracked(t *testing.T) {
+	app := newTestApp(t)
+
+	// Setup: tracked file in a custom CL, untracked file in Unversioned
+	app.WriteTrackedFile("feature.go", "feature code")
+	app.WriteFile("notes.txt", "my notes")
+	app.refresh()
+
+	// Create a custom CL and move the tracked file there
+	app.state.Focus = types.PanelChangelists
+	app.PressKey("n")
+	app.TypePrompt("Feature")
+	app.refresh()
+
+	app.selectCL("Feature")
+	app.state.Focus = types.PanelFiles
+	idx := app.fileIndex("feature.go")
+	if idx >= 0 {
+		app.state.CLFileSel = idx
+		app.PressKey("m")
+		app.TypePrompt("Feature")
+		app.refresh()
+	}
+
+	// Snapshot shelve
+	app.state.Focus = types.PanelChangelists
+	app.PressKey("S")
+
+	// Both should be gone
+	status := app.gitStatus()
+	if strings.Contains(status, "feature.go") || strings.Contains(status, "notes.txt") {
+		t.Errorf("all files should be gone after snapshot shelve, status: %s", status)
+	}
+
+	// Unshelve all
+	app.state.Focus = types.PanelShelves
+	app.state.ShelfSel = 0
+	app.PressKey("U")
+	app.Confirm()
+
+	// Both restored
+	status = app.gitStatus()
+	if !strings.Contains(status, "feature.go") {
+		t.Errorf("feature.go should be restored, status: %s", status)
+	}
+	if !strings.Contains(status, "notes.txt") {
+		t.Errorf("notes.txt should be restored, status: %s", status)
+	}
+
+	// notes.txt must be untracked again
+	if !strings.Contains(status, "?? notes.txt") {
+		t.Errorf("notes.txt should be untracked after unshelve, status: %s", status)
+	}
+
+	// Feature CL should be recreated with feature.go
+	app.refresh()
+	hasCL := false
+	for _, n := range app.clNames {
+		if n == "Feature" {
+			hasCL = true
+		}
+	}
+	if !hasCL {
+		t.Error("Feature CL should be recreated after unshelve all")
+	}
+
+	// Unversioned Files CL should have notes.txt
+	app.selectCL(changelist.UnversionedName)
+	if app.fileIndex("notes.txt") < 0 {
+		t.Error("notes.txt should be in Unversioned Files CL after unshelve")
+	}
+}
+
+// TestSnapshotShelve_UntrackedInCustomCL verifies that untracked files
+// moved to a custom CL are shelved under that CL name, not under Unversioned.
+func TestSnapshotShelve_UntrackedInCustomCL(t *testing.T) {
+	app := newTestApp(t)
+
+	// Create an untracked file
+	app.WriteFile("debug.log", "debug info")
+	app.refresh()
+
+	// Move it from Unversioned to a custom CL
+	app.state.Focus = types.PanelChangelists
+	app.PressKey("n")
+	app.TypePrompt("Debug")
+	app.refresh()
+
+	app.selectCL(changelist.UnversionedName)
+	app.state.Focus = types.PanelFiles
+	idx := app.fileIndex("debug.log")
+	if idx >= 0 {
+		app.state.CLFileSel = idx
+		app.PressKey("m")
+		app.TypePrompt("Debug")
+		app.refresh()
+	}
+
+	// Snapshot shelve
+	app.state.Focus = types.PanelChangelists
+	app.PressKey("S")
+
+	// File should be gone
+	status := app.gitStatus()
+	if strings.Contains(status, "debug.log") {
+		t.Errorf("debug.log should be gone after snapshot shelve, status: %s", status)
+	}
+
+	// Shelf should be named "Debug" (the CL name), not "Unversioned Files"
+	found := false
+	for _, s := range app.shelves {
+		if s.Meta.Name == "Debug" {
+			found = true
+			if len(s.Meta.Files) != 1 || s.Meta.Files[0] != "debug.log" {
+				t.Errorf("Debug shelf files = %v, want [debug.log]", s.Meta.Files)
+			}
+		}
+	}
+	if !found {
+		t.Error("expected a shelf named 'Debug'")
+	}
+
+	// Unshelve and verify it comes back as untracked
+	app.state.Focus = types.PanelShelves
+	app.state.ShelfSel = 0
+	app.PressKey("U")
+	app.Confirm()
+
+	status = app.gitStatus()
+	if !strings.Contains(status, "?? debug.log") {
+		t.Errorf("debug.log should be untracked after unshelve, status: %s", status)
+	}
+}
+
+// ===========================================================================
 // Sorting helper for deterministic test assertions
 // ===========================================================================
 

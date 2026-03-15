@@ -272,6 +272,14 @@ func StageFiles(files ...string) error {
 	return err
 }
 
+// UnstageFiles removes files from the staging area without deleting them.
+func UnstageFiles(files ...string) error {
+	args := []string{"rm", "--cached", "--"}
+	args = append(args, files...)
+	_, err := action(args...)
+	return err
+}
+
 // CommitFiles stages the given files and commits with the given message.
 // Uses "git commit -- <files>" to commit only the specified files
 // without disturbing any other staged changes in the index.
