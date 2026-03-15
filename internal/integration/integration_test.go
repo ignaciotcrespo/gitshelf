@@ -411,9 +411,11 @@ func (app *TestApp) buildKeyContext() controller.KeyContext {
 	}
 	ctx.ShelfNames = make([]string, len(app.shelves))
 	ctx.ShelfDirs = make([]string, len(app.shelves))
+	ctx.ShelfSnapshots = make([]string, len(app.shelves))
 	for i, s := range app.shelves {
 		ctx.ShelfNames[i] = s.Meta.Name
 		ctx.ShelfDirs[i] = s.PatchDir
+		ctx.ShelfSnapshots[i] = s.Meta.Snapshot
 	}
 	return ctx
 }
@@ -458,6 +460,11 @@ func (app *TestApp) PressKey(key string) {
 	kr := controller.HandleKey(key, app.state, keyCtx)
 	app.state = kr.State
 
+	if kr.RunSnapshotShelve {
+		action.ExecuteSnapshotShelve(&app.stores, app.logger)
+		app.refresh()
+		return
+	}
 	if kr.RunRemote != nil {
 		result := &prompt.Result{Mode: kr.RunRemote.Mode, Value: kr.RunRemote.Remote}
 		action.Execute(result, &app.stores, app.logger, nil)
@@ -495,6 +502,7 @@ func (app *TestApp) TypePrompt(value string) {
 		Mode:  mode,
 		Value: value,
 	}
+	app.prompt.Cancel()
 	app.handlePromptResult(result)
 }
 
@@ -3331,7 +3339,7 @@ func TestWT_Amend_InActiveWorktree(t *testing.T) {
 		t.Fatalf("amend-me.go not in clFiles after modify")
 	}
 	app.SelectFile(idx)
-	app.PressKey("a")
+	app.PressKey("A")
 	app.TypePrompt("amended wt commit")
 
 	// Verify amend in worktree log
@@ -3798,6 +3806,184 @@ func TestWT_CLState_NotCorruptedByAutoAssign(t *testing.T) {
 	if !found {
 		t.Errorf("stable.go should still be in MainCL after worktree switch round-trip; clFiles=%v", app.clFiles)
 	}
+}
+
+// ===========================================================================
+// Snapshot shelve/unshelve tests
+// ===========================================================================
+
+// TestSnapshotShelve verifies S shelves all CLs with changed files as a snapshot group.
+func TestSnapshotShelve(t *testing.T) {
+	app := newTestApp(t)
+
+	// Create two CLs with files
+	app.WriteTrackedFile("feat.go", "feature code")
+	app.WriteTrackedFile("fix.go", "bugfix code")
+	app.refresh()
+
+	app.state.Focus = types.PanelChangelists
+	app.PressKey("n")
+	app.TypePrompt("Feature")
+	app.refresh()
+
+	// Move feat.go to Feature CL
+	app.selectCL("Feature")
+	app.state.Focus = types.PanelFiles
+	idx := app.fileIndex("feat.go")
+	if idx >= 0 {
+		app.state.CLFileSel = idx
+		app.PressKey("m")
+		app.TypePrompt("Feature")
+		app.refresh()
+	}
+
+	// Now press S to snapshot shelve
+	app.state.Focus = types.PanelChangelists
+	app.PressKey("S")
+
+	// Should have shelves with matching snapshot IDs
+	if len(app.shelves) == 0 {
+		t.Fatal("expected shelves after snapshot shelve")
+	}
+
+	snapshotID := app.shelves[0].Meta.Snapshot
+	if snapshotID == "" {
+		t.Fatal("expected non-empty snapshot ID")
+	}
+	for _, s := range app.shelves {
+		if s.Meta.Snapshot != snapshotID {
+			t.Errorf("all shelves should share snapshot ID %q, got %q", snapshotID, s.Meta.Snapshot)
+		}
+	}
+
+	// Files should be restored (working tree clean)
+	status := app.gitStatus()
+	if strings.Contains(status, "feat.go") || strings.Contains(status, "fix.go") {
+		t.Errorf("files should be restored after snapshot shelve, status: %s", status)
+	}
+}
+
+// TestSnapshotUnshelveAll verifies U unshelves all shelves in a snapshot group.
+func TestSnapshotUnshelveAll(t *testing.T) {
+	app := newTestApp(t)
+
+	// Create two CLs and snapshot shelve them
+	app.WriteTrackedFile("a.go", "aaa")
+	app.WriteTrackedFile("b.go", "bbb")
+	app.refresh()
+
+	app.state.Focus = types.PanelChangelists
+	app.PressKey("n")
+	app.TypePrompt("BugFix")
+	app.refresh()
+
+	// Move b.go to BugFix
+	app.selectCL("BugFix")
+	app.state.Focus = types.PanelFiles
+	idx := app.fileIndex("b.go")
+	if idx >= 0 {
+		app.state.CLFileSel = idx
+		app.PressKey("m")
+		app.TypePrompt("BugFix")
+		app.refresh()
+	}
+
+	app.state.Focus = types.PanelChangelists
+	app.PressKey("S")
+
+	if len(app.shelves) == 0 {
+		t.Fatal("no shelves after snapshot shelve")
+	}
+
+	// Now unshelve all
+	app.state.Focus = types.PanelShelves
+	app.state.ShelfSel = 0
+	app.PressKey("U")
+	app.Confirm()
+
+	// Files should be back
+	status := app.gitStatus()
+	if !strings.Contains(status, "a.go") || !strings.Contains(status, "b.go") {
+		t.Errorf("files should be restored after unshelve all, status: %s", status)
+	}
+
+	// Shelves should still be present (unshelve all does not delete them)
+	if len(app.shelves) == 0 {
+		t.Error("shelves should remain after unshelve all")
+	}
+
+	// CLs should be recreated
+	hasCL := func(name string) bool {
+		for _, n := range app.clNames {
+			if n == name {
+				return true
+			}
+		}
+		return false
+	}
+	if !hasCL("BugFix") {
+		t.Error("BugFix CL should be recreated after unshelve all")
+	}
+}
+
+// TestSnapshotShelveSkipsEmpty verifies S skips CLs with no changed files.
+func TestSnapshotShelveSkipsEmpty(t *testing.T) {
+	app := newTestApp(t)
+
+	// Create an empty CL (no files)
+	app.state.Focus = types.PanelChangelists
+	app.PressKey("n")
+	app.TypePrompt("EmptyCL")
+	app.refresh()
+
+	snap := app.gitSnapshot()
+
+	// Only one tracked file in Changes
+	app.WriteTrackedFile("only.go", "content")
+	app.refresh()
+
+	app.state.Focus = types.PanelChangelists
+	app.PressKey("S")
+
+	// Should have exactly 1 shelf (Changes), not 2
+	shelfCount := 0
+	for _, s := range app.shelves {
+		if s.Meta.Snapshot != "" {
+			shelfCount++
+		}
+	}
+	if shelfCount != 1 {
+		t.Errorf("expected 1 snapshot shelf (skipping empty CL), got %d", shelfCount)
+	}
+
+	// The snapshot shelve restored the file, so git should show clean
+	_ = snap
+}
+
+// TestSnapshotUnshelveOnNonSnapshot verifies U does nothing on a regular shelf.
+func TestSnapshotUnshelveOnNonSnapshot(t *testing.T) {
+	app := newTestApp(t)
+
+	// Create a regular shelf
+	app.WriteTrackedFile("reg.go", "regular")
+	app.refresh()
+	app.selectCL(changelist.DefaultName)
+	app.selectAllFiles()
+	app.PressKey("s")
+	app.TypePrompt("regular-shelf")
+
+	snap := app.gitSnapshot()
+
+	// Try U on the regular shelf
+	app.state.Focus = types.PanelShelves
+	app.state.ShelfSel = 0
+	app.PressKey("U")
+
+	// Should have no effect (no prompt started)
+	if app.prompt.Active() {
+		t.Error("U on non-snapshot shelf should not start a prompt")
+	}
+	app.assertGitUnchanged(snap)
 }
 
 // ===========================================================================

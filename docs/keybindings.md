@@ -21,6 +21,7 @@
 | `r` | Rename changelist |
 | `d` | Delete changelist |
 | `s` | Shelve all files in changelist |
+| `S` | Snapshot shelve all changelists |
 | `B` | Accept dirty changes as new baseline |
 | `W` | Copy changelist to clipboard |
 | `V` | Paste changelist from clipboard |
@@ -45,6 +46,7 @@
 | Key | Action |
 |-----|--------|
 | `u` | Unshelve (restore changes to working tree) |
+| `U` | Unshelve all shelves in snapshot group |
 | `r` | Rename shelf |
 | `d` | Drop shelf |
 | `y` | Copy shelf patch to clipboard |

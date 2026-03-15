@@ -76,6 +76,7 @@ type KeyContext struct {
 	ShelfCount      int
 	ShelfNames      []string
 	ShelfDirs       []string // PatchDir paths for each shelf
+	ShelfSnapshots  []string // Snapshot ID for each shelf (empty = regular)
 	ShelfFileCount  int
 	SelectedCount   int
 	UnversionedName string
@@ -96,7 +97,8 @@ type KeyResult struct {
 	State       State
 	Refresh     RefreshFlag
 	StartPrompt *PromptReq
-	RunRemote   *RemoteReq // immediate push/pull (no prompt needed)
+	RunRemote        *RemoteReq // immediate push/pull (no prompt needed)
+	RunSnapshotShelve bool       // execute snapshot shelve (no prompt needed)
 	CopyPatch   CopyPatchReq // request to copy a patch to clipboard
 	OpenURL     string     // URL to open in browser
 	StatusMsg   string

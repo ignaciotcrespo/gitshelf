@@ -74,6 +74,8 @@ func (g gitshelfLabeler) ConfirmMessage(action types.ConfirmAction, target strin
 		return formatUnshelveMessage(target)
 	case types.ConfirmPasteFullContent:
 		return fmt.Sprintf("Overwrite %s files in working tree?", target)
+	case types.ConfirmSnapshotUnshelve:
+		return "Unshelve all shelves in this group?"
 	}
 	return ""
 }

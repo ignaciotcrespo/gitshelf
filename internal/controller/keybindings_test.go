@@ -84,6 +84,7 @@ func TestKeyBindings_CLKeys(t *testing.T) {
 		// The key should produce some effect: prompt, status, copyPatch, quit, or state change
 		hasEffect := r.StartPrompt != nil ||
 			r.RunRemote != nil ||
+			r.RunSnapshotShelve ||
 			r.StatusMsg != "" ||
 			r.ErrorMsg != "" ||
 			r.CopyPatch.Source != CopyPatchNone ||
@@ -102,10 +103,11 @@ func TestKeyBindings_ShelfKeys(t *testing.T) {
 		s.Focus = types.PanelShelves
 		s.Pivot = types.PanelShelves
 		ctx := KeyContext{
-			ShelfCount: 1,
-			ShelfNames: []string{"my-shelf"},
-			CLNames:    []string{"Changes"},
-			CLCount:    1,
+			ShelfCount:     1,
+			ShelfNames:     []string{"my-shelf"},
+			ShelfSnapshots: []string{"snap-1"},
+			CLNames:        []string{"Changes"},
+			CLCount:        1,
 		}
 
 		r := HandleKey(b.Key, s, ctx)

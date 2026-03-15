@@ -65,4 +65,5 @@ const (
 	ConfirmShelve
 	ConfirmUnshelve
 	ConfirmPasteFullContent
+	ConfirmSnapshotUnshelve
 )

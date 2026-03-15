@@ -246,6 +246,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.handleCopyPatch(kr.CopyPatch)
 			return m, nil
 		}
+		if kr.RunSnapshotShelve {
+			action.ExecuteSnapshotShelve(&m.stores, &m)
+			m.refresh()
+			return m, nil
+		}
 		if kr.RunRemote != nil {
 			m.executeRemote(kr.RunRemote)
 			refreshCmd := m.applyRefresh(kr.Refresh)
@@ -309,9 +314,11 @@ func (m *Model) buildKeyContext() controller.KeyContext {
 	// Build shelf names and dirs
 	ctx.ShelfNames = make([]string, len(m.shelves))
 	ctx.ShelfDirs = make([]string, len(m.shelves))
+	ctx.ShelfSnapshots = make([]string, len(m.shelves))
 	for i, s := range m.shelves {
 		ctx.ShelfNames[i] = s.Meta.Name
 		ctx.ShelfDirs[i] = s.PatchDir
+		ctx.ShelfSnapshots[i] = s.Meta.Snapshot
 	}
 	ctx.DirtyFiles = m.dirtyFiles
 	ctx.DirtyCLs = m.dirtyCLs

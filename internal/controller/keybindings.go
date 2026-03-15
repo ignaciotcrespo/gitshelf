@@ -44,6 +44,7 @@ var CLBindings = []KeyBinding{
 	{Key: "B", Display: "B", Short: "accept", Desc: "Accept dirty changes as new baseline"},
 	{Key: "W", Display: "W", Short: "copy", Desc: "Copy changelist to clipboard (for pasting in another worktree)"},
 	{Key: "V", Display: "V", Short: "paste", Desc: "Paste changelist from clipboard"},
+	{Key: "S", Display: "S", Short: "shelve all", Desc: "Shelve all changelists as a snapshot"},
 	{Key: "y", Display: "y", Short: "copy patch", Desc: "Copy changelist diff as patch to clipboard"},
 }
 
@@ -64,6 +65,7 @@ var ShelfBindings = []KeyBinding{
 	{Key: "u", Display: "u", Short: "unshelve", Desc: "Unshelve (restore changes to working tree)"},
 	{Key: "r", Display: "r", Short: "rename", Desc: "Rename shelf"},
 	{Key: "d", Display: "d", Short: "drop", Desc: "Drop shelf"},
+	{Key: "U", Display: "U", Short: "unshelve all", Desc: "Unshelve all shelves in snapshot group"},
 	{Key: "y", Display: "y", Short: "copy patch", Desc: "Copy shelf patch to clipboard"},
 }
 

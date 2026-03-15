@@ -21,6 +21,7 @@ type Metadata struct {
 	CreatedAt string   `json:"createdAt"`
 	Files     []string `json:"files"`
 	Worktree  string   `json:"worktree,omitempty"`
+	Snapshot  string   `json:"snapshot,omitempty"`
 }
 
 // Shelf represents a saved shelf with its metadata.
@@ -91,6 +92,61 @@ func (s *Store) Create(name string, files []string, restore bool) error {
 	}
 
 	// Restore files (revert changes)
+	if restore {
+		return git.RestoreFiles(files...)
+	}
+	return nil
+}
+
+// CreateSnapshot creates a shelf with a snapshot group ID.
+func (s *Store) CreateSnapshot(name string, files []string, restore bool, snapshotID string) error {
+	if len(files) == 0 {
+		return fmt.Errorf("no files to shelve")
+	}
+
+	dirName := fmt.Sprintf("%s_%s", time.Now().Format("20060102-150405.000"), sanitizeName(name))
+	shelfDir := filepath.Join(s.dir, dirName)
+	if err := os.MkdirAll(shelfDir, 0755); err != nil {
+		return err
+	}
+
+	diff, err := git.DiffFiles(files...)
+	if err != nil {
+		return fmt.Errorf("failed to get diff: %w", err)
+	}
+	if diff == "" {
+		// No changes for these files — clean up and skip
+		os.RemoveAll(shelfDir)
+		return nil
+	}
+
+	if len(diff) > 0 && diff[len(diff)-1] != '\n' {
+		diff += "\n"
+	}
+
+	patchPath := filepath.Join(shelfDir, "patch.diff")
+	if err := os.WriteFile(patchPath, []byte(diff), 0644); err != nil {
+		return err
+	}
+
+	meta := Metadata{
+		Name:      name,
+		Branch:    git.CurrentBranch(),
+		Commit:    git.HeadCommit(),
+		CreatedAt: time.Now().Format(time.RFC3339Nano),
+		Files:     files,
+		Worktree:  git.WorktreeName(),
+		Snapshot:  snapshotID,
+	}
+	metaData, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return err
+	}
+	metaPath := filepath.Join(shelfDir, "metadata.json")
+	if err := os.WriteFile(metaPath, metaData, 0644); err != nil {
+		return err
+	}
+
 	if restore {
 		return git.RestoreFiles(files...)
 	}

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/ignaciotcrespo/gitshelf/internal/changelist"
 	"github.com/ignaciotcrespo/gitshelf/internal/git"
@@ -133,6 +134,9 @@ func executeConfirm(r *prompt.Result, stores *Stores, log Logger, ctx *ActionCon
 
 	case types.ConfirmAcceptDirty:
 		return executeAcceptDirty(r.ConfirmTarget, stores, log, ctx)
+
+	case types.ConfirmSnapshotUnshelve:
+		return executeSnapshotUnshelve(r.ConfirmTarget, stores, log)
 	}
 	return false
 }
@@ -445,6 +449,89 @@ func saveCL(stores *Stores, log Logger) {
 	if err := stores.CL.Save(stores.State); err != nil {
 		log.SetError(fmt.Sprintf("Save error: %v", err))
 	}
+}
+
+// ExecuteSnapshotShelve shelves all changelists that have changed files, grouped by a shared snapshot ID.
+func ExecuteSnapshotShelve(stores *Stores, log Logger) bool {
+	snapshotID := time.Now().Format("20060102-150405.000")
+	changed := git.ChangedFileSet()
+	var totalFiles int
+
+	for _, cl := range stores.State.Changelists {
+		if cl.Name == changelist.UnversionedName {
+			continue
+		}
+		// Only shelve files that are actually changed in the working tree
+		var files []string
+		for _, f := range cl.Files {
+			if changed[f] {
+				files = append(files, f)
+			}
+		}
+		if len(files) == 0 {
+			continue
+		}
+
+		err := stores.Shelf.CreateSnapshot(cl.Name, files, true, snapshotID)
+		if err != nil {
+			log.SetError(fmt.Sprintf("Snapshot shelve error on '%s': %v", cl.Name, err))
+			return false
+		}
+		totalFiles += len(files)
+
+		// Remove shelved files from CL
+		for i := range stores.State.Changelists {
+			if stores.State.Changelists[i].Name == cl.Name {
+				for _, f := range files {
+					stores.State.Changelists[i].Files = removeStr(stores.State.Changelists[i].Files, f)
+				}
+				break
+			}
+		}
+	}
+
+	if totalFiles == 0 {
+		log.SetError("No changed files to shelve")
+		return false
+	}
+
+	saveCL(stores, log)
+	log.SetStatus(fmt.Sprintf("Snapshot shelved %d file(s)", totalFiles))
+	return true
+}
+
+func executeSnapshotUnshelve(snapshotID string, stores *Stores, log Logger) bool {
+	shelves, err := stores.Shelf.List()
+	if err != nil {
+		log.SetError(fmt.Sprintf("Error listing shelves: %v", err))
+		return false
+	}
+
+	var restored int
+	for _, s := range shelves {
+		if s.Meta.Snapshot != snapshotID {
+			continue
+		}
+		if err := stores.Shelf.ApplyDir(s.PatchDir, false); err != nil {
+			log.SetError(fmt.Sprintf("Unshelve error for '%s': %v", s.Meta.Name, err))
+			return false
+		}
+		// Assign files to a CL named after the shelf
+		changelist.AddChangelist(stores.State, s.Meta.Name)
+		for _, f := range s.Meta.Files {
+			changelist.AssignFile(stores.State, f, s.Meta.Name)
+		}
+		restored++
+	}
+
+	if restored == 0 {
+		log.SetError("No snapshot shelves found")
+		return false
+	}
+
+	saveCL(stores, log)
+	log.SetStatus(fmt.Sprintf("Unshelved %d changelist(s)", restored))
+	return true
 }
 
 func removeStr(slice []string, s string) []string {

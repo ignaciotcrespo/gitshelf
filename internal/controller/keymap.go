@@ -313,6 +313,11 @@ func handleChangelistKey(key string, r KeyResult, ctx KeyContext) KeyResult {
 			}
 		}
 
+	case "S":
+		if r.State.Focus == types.PanelChangelists && ctx.CLCount > 0 {
+			r.RunSnapshotShelve = true
+		}
+
 	case "p":
 		if r.State.Focus == types.PanelChangelists {
 			r.StartPrompt, r.RunRemote = buildRemoteAction(types.PromptPush, ctx.Remotes)
@@ -414,6 +419,18 @@ func handleShelfKey(key string, r KeyResult, ctx KeyContext) KeyResult {
 			r.StartPrompt = &PromptReq{
 				Mode:         types.PromptRenameShelf,
 				DefaultValue: ctx.ShelfNames[r.State.ShelfSel],
+			}
+		}
+
+	case "U":
+		if ctx.ShelfCount > 0 && r.State.ShelfSel < len(ctx.ShelfSnapshots) {
+			snapshotID := ctx.ShelfSnapshots[r.State.ShelfSel]
+			if snapshotID != "" {
+				r.StartPrompt = &PromptReq{
+					Mode:    types.PromptConfirm,
+					Confirm: types.ConfirmSnapshotUnshelve,
+					Target:  snapshotID,
+				}
 			}
 		}
 	}
