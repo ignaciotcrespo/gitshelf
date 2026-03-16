@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/ignaciotcrespo/gitshelf/internal/types"
-	"github.com/ignaciotcrespo/gitshelf/pkg/tui"
+	"github.com/ignaciotcrespo/tui-framework"
 )
 
 // CyclePanelState cycles a toggleable panel through: normal → maximized → hidden → normal.

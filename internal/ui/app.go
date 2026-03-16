@@ -20,7 +20,7 @@ import (
 	"github.com/ignaciotcrespo/gitshelf/internal/ui/action"
 	"github.com/ignaciotcrespo/gitshelf/internal/ui/panel"
 	"github.com/ignaciotcrespo/gitshelf/internal/ui/prompt"
-	"github.com/ignaciotcrespo/gitshelf/pkg/tui"
+	"github.com/ignaciotcrespo/tui-framework"
 )
 
 // diffLoadMsg is sent after a debounce delay to trigger diff loading.

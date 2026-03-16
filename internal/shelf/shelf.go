@@ -20,6 +20,7 @@ type Metadata struct {
 	Commit    string   `json:"commit"`
 	CreatedAt string   `json:"createdAt"`
 	Files     []string `json:"files"`
+	Untracked []string `json:"untracked,omitempty"`
 	Worktree  string   `json:"worktree,omitempty"`
 	Snapshot  string   `json:"snapshot,omitempty"`
 }
@@ -80,6 +81,7 @@ func (s *Store) Create(name string, files []string, restore bool) error {
 		Commit:    git.HeadCommit(),
 		CreatedAt: time.Now().Format(time.RFC3339Nano),
 		Files:     files,
+		Untracked: untrackedSubset(files),
 		Worktree:  git.WorktreeName(),
 	}
 	metaData, err := json.MarshalIndent(meta, "", "  ")
@@ -135,6 +137,7 @@ func (s *Store) CreateSnapshot(name string, files []string, restore bool, snapsh
 		Commit:    git.HeadCommit(),
 		CreatedAt: time.Now().Format(time.RFC3339Nano),
 		Files:     files,
+		Untracked: untrackedSubset(files),
 		Worktree:  git.WorktreeName(),
 		Snapshot:  snapshotID,
 	}
@@ -225,6 +228,10 @@ func (s *Store) ApplyDir(shelfDir string, force bool) error {
 	meta, err := loadMetaFrom(shelfDir)
 	if err == nil && len(meta.Files) > 0 {
 		git.StageFiles(meta.Files...)
+		// Unstage files that were originally untracked so they return to untracked state
+		if len(meta.Untracked) > 0 {
+			git.UnstageFiles(meta.Untracked...)
+		}
 	}
 	return nil
 }
@@ -339,4 +346,20 @@ func loadMetaFrom(shelfDir string) (*Metadata, error) {
 func sanitizeName(name string) string {
 	r := strings.NewReplacer(" ", "-", "/", "-", "\\", "-")
 	return r.Replace(name)
+}
+
+// untrackedSubset returns the subset of files that are currently untracked.
+func untrackedSubset(files []string) []string {
+	untracked, _ := git.UntrackedFiles()
+	set := make(map[string]bool, len(untracked))
+	for _, f := range untracked {
+		set[f] = true
+	}
+	var result []string
+	for _, f := range files {
+		if set[f] {
+			result = append(result, f)
+		}
+	}
+	return result
 }

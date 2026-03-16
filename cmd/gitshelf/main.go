@@ -22,11 +22,14 @@ func main() {
 	}
 
 	// Find git repo root
+	fmt.Printf("Detecting git repository...\n")
 	root, err := git.RepoRoot()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Error: not a git repository")
+		fmt.Fprintln(os.Stderr, "Error: not a git repository (or git is not installed)\nRun gitshelf from inside a git repository.")
 		os.Exit(1)
 	}
+
+	fmt.Printf("Git repository: %s\n", root)
 
 	gitshelfDir := filepath.Join(root, ".gitshelf")
 
@@ -48,6 +51,8 @@ func main() {
 
 	// Add .gitshelf/ to .gitignore if not already there
 	ensureGitignore(root)
+
+	fmt.Printf("Loading...\n")
 
 	model := ui.NewModel(gitshelfDir, version)
 
