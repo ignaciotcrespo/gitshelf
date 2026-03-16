@@ -461,7 +461,7 @@ func ExecuteSnapshotShelve(stores *Stores, log Logger) bool {
 		// Only shelve files that are actually changed in the working tree
 		var files []string
 		for _, f := range cl.Files {
-			if changed[f] && !strings.HasPrefix(f, ".gitshelf/") && f != ".gitshelf" {
+			if changed[f] {
 				files = append(files, f)
 			}
 		}

@@ -125,7 +125,11 @@ func TrackedChangedFiles() ([]string, error) {
 		if idx := strings.Index(file, " -> "); idx >= 0 {
 			file = file[idx+4:]
 		}
-		files = append(files, unquoteGitPath(file))
+		f := unquoteGitPath(file)
+		if isGitshelfPath(f) {
+			continue
+		}
+		files = append(files, f)
 	}
 	return files, nil
 }
@@ -213,11 +217,15 @@ func UntrackedFiles() ([]string, error) {
 	if out == "" {
 		return nil, nil
 	}
-	lines := strings.Split(out, "\n")
-	for i, l := range lines {
-		lines[i] = unquoteGitPath(l)
+	var files []string
+	for _, l := range strings.Split(out, "\n") {
+		f := unquoteGitPath(l)
+		if isGitshelfPath(f) {
+			continue
+		}
+		files = append(files, f)
 	}
-	return lines, nil
+	return files, nil
 }
 
 // RestoreFiles reverts the given files to HEAD state.
@@ -472,6 +480,9 @@ func FileDiffHashes() map[string]string {
 			continue
 		}
 		file := parts[1]
+		if isGitshelfPath(file) {
+			continue
+		}
 
 		// Hash the full section content
 		h := uint64(0)
@@ -613,6 +624,11 @@ func ApplyPatchFromString(patch string) error {
 	}
 	addLog([]string{"apply"}, "Patch applied", "")
 	return nil
+}
+
+// isGitshelfPath returns true for paths inside the .gitshelf/ directory.
+func isGitshelfPath(path string) bool {
+	return path == ".gitshelf" || strings.HasPrefix(path, ".gitshelf/") || strings.HasPrefix(path, ".gitshelf\\")
 }
 
 // unquoteGitPath strips quotes that git adds around paths containing spaces or special chars.

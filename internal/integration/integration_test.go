@@ -4253,6 +4253,177 @@ func TestSnapshotShelve_UntrackedInCustomCL(t *testing.T) {
 }
 
 // ===========================================================================
+// .gitshelf/ must be invisible to the user
+// ===========================================================================
+
+// TestGitshelfDir_NotInChangelists verifies .gitshelf/ files never appear in
+// any changelist — not in "Changes", not in "Unversioned Files".
+func TestGitshelfDir_NotInChangelists(t *testing.T) {
+	app := newTestApp(t)
+
+	// .gitshelf/ already exists from newTestApp setup.
+	// Create a user file too so we know the CL system works.
+	app.WriteFile("user.txt", "hello")
+	app.refresh()
+
+	// .gitshelf should not appear in any CL
+	for _, clName := range app.clNames {
+		app.selectCL(clName)
+		for _, f := range app.clFiles {
+			if strings.HasPrefix(f, ".gitshelf") {
+				t.Errorf("CL %q contains .gitshelf file: %s", clName, f)
+			}
+		}
+	}
+
+	// user.txt should be present
+	app.selectCL(changelist.UnversionedName)
+	if app.fileIndex("user.txt") < 0 {
+		t.Error("user.txt should be in Unversioned Files")
+	}
+}
+
+// TestGitshelfDir_NotCountedAsUnversioned verifies .gitshelf/ is not counted
+// in the file count shown next to "Unversioned Files".
+func TestGitshelfDir_NotCountedAsUnversioned(t *testing.T) {
+	app := newTestApp(t)
+	app.refresh()
+
+	// With no user files, Unversioned Files CL should either not exist
+	// or have 0 files — .gitshelf/ must not appear.
+	for _, clName := range app.clNames {
+		if clName == changelist.UnversionedName {
+			app.selectCL(clName)
+			if len(app.clFiles) != 0 {
+				t.Errorf("Unversioned Files should have 0 files, got %d: %v", len(app.clFiles), app.clFiles)
+			}
+			return
+		}
+	}
+	// Unversioned Files CL doesn't exist — that's correct too
+}
+
+// TestGitshelfDir_CannotCommit verifies .gitshelf/ files cannot be committed
+// even if somehow selected.
+func TestGitshelfDir_CannotCommit(t *testing.T) {
+	app := newTestApp(t)
+	app.WriteTrackedFile("real.go", "code")
+	app.refresh()
+
+	snap := app.gitSnapshot()
+
+	// Commit only the real file
+	app.selectCL(changelist.DefaultName)
+	idx := app.fileIndex("real.go")
+	if idx < 0 {
+		t.Fatal("real.go not found")
+	}
+	app.SelectFile(idx)
+	app.PressKey("c")
+	app.TypePrompt("commit real file")
+
+	// Verify .gitshelf/ is NOT in the commit
+	show := runOut(t, app.dir, "git", "show", "--name-only", "--format=")
+	if strings.Contains(show, ".gitshelf") {
+		t.Errorf("commit should not contain .gitshelf files, got: %s", show)
+	}
+
+	// .gitshelf/ dir must still exist
+	if _, err := os.Stat(app.gitshelfDir); os.IsNotExist(err) {
+		t.Error(".gitshelf dir should still exist after commit")
+	}
+	_ = snap
+}
+
+// TestGitshelfDir_NotShelved verifies .gitshelf/ files are excluded from
+// regular shelve operations.
+func TestGitshelfDir_NotShelved(t *testing.T) {
+	app := newTestApp(t)
+	app.WriteTrackedFile("notes.txt", "my notes")
+	app.refresh()
+
+	// Shelve from CL panel (shelves all files in the CL)
+	app.selectCL(changelist.DefaultName)
+	app.state.Focus = types.PanelChangelists
+	app.PressKey("s")
+	app.TypePrompt("my-shelf")
+
+	// Verify shelf does not contain .gitshelf files
+	for _, s := range app.shelves {
+		for _, f := range s.Meta.Files {
+			if strings.HasPrefix(f, ".gitshelf") {
+				t.Errorf("shelf %q contains .gitshelf file: %s", s.Meta.Name, f)
+			}
+		}
+	}
+}
+
+// TestGitshelfDir_NotInSnapshotShelve verifies S excludes .gitshelf/ files.
+func TestGitshelfDir_NotInSnapshotShelve(t *testing.T) {
+	app := newTestApp(t)
+	app.WriteTrackedFile("code.go", "package main")
+	app.WriteFile("draft.txt", "draft")
+	app.refresh()
+
+	app.state.Focus = types.PanelChangelists
+	app.PressKey("S")
+
+	for _, s := range app.shelves {
+		for _, f := range s.Meta.Files {
+			if strings.HasPrefix(f, ".gitshelf") {
+				t.Errorf("snapshot shelf %q contains .gitshelf file: %s", s.Meta.Name, f)
+			}
+		}
+	}
+}
+
+// TestGitshelfDir_NotInDirtyDetection verifies .gitshelf/ changes don't
+// trigger dirty markers on changelists.
+func TestGitshelfDir_NotInDirtyDetection(t *testing.T) {
+	app := newTestApp(t)
+	app.WriteTrackedFile("code.go", "v1")
+	app.refresh()
+
+	// Accept baseline
+	app.selectCL(changelist.DefaultName)
+	app.state.Focus = types.PanelChangelists
+	app.PressKey("B")
+	if app.prompt.Active() {
+		app.Confirm()
+	}
+	app.refresh()
+
+	// Write something inside .gitshelf/ (simulating internal state change)
+	os.WriteFile(filepath.Join(app.gitshelfDir, "temp.json"), []byte("{}"), 0644)
+	app.refresh()
+
+	// Dirty detection should not flag anything related to .gitshelf
+	for f := range app.dirtyFiles {
+		if strings.HasPrefix(f, ".gitshelf") {
+			t.Errorf("dirty detection includes .gitshelf file: %s", f)
+		}
+	}
+}
+
+// TestGitshelfDir_ExcludedFromChangedFileSet verifies git.ChangedFileSet()
+// does not return .gitshelf/ paths.
+func TestGitshelfDir_ExcludedFromChangedFileSet(t *testing.T) {
+	app := newTestApp(t)
+	app.WriteFile("user.txt", "content")
+	app.refresh()
+
+	changed := git.ChangedFileSet()
+	for f := range changed {
+		if strings.HasPrefix(f, ".gitshelf") {
+			t.Errorf("ChangedFileSet includes .gitshelf file: %s", f)
+		}
+	}
+	if !changed["user.txt"] {
+		t.Error("ChangedFileSet should include user.txt")
+	}
+}
+
+// ===========================================================================
 // Sorting helper for deterministic test assertions
 // ===========================================================================
 
