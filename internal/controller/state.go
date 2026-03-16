@@ -2,7 +2,7 @@ package controller
 
 import (
 	"github.com/ignaciotcrespo/gitshelf/internal/types"
-	"github.com/ignaciotcrespo/gitshelf/pkg/tui"
+	"github.com/ignaciotcrespo/tui-framework"
 )
 
 // State holds all navigational/selection state. No data, no stores.

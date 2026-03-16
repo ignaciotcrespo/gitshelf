@@ -19,7 +19,7 @@ import (
 	"github.com/ignaciotcrespo/gitshelf/internal/types"
 	"github.com/ignaciotcrespo/gitshelf/internal/ui/action"
 	"github.com/ignaciotcrespo/gitshelf/internal/ui/prompt"
-	"github.com/ignaciotcrespo/gitshelf/pkg/tui"
+	"github.com/ignaciotcrespo/tui-framework"
 )
 
 // ---------------------------------------------------------------------------

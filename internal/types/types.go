@@ -4,7 +4,7 @@
 // without creating circular or upward dependencies.
 package types
 
-import "github.com/ignaciotcrespo/gitshelf/pkg/tui"
+import "github.com/ignaciotcrespo/tui-framework"
 
 // PanelID identifies a panel in the layout.
 type PanelID = tui.PanelID

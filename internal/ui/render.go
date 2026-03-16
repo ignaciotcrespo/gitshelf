@@ -15,7 +15,7 @@ import (
 	"github.com/ignaciotcrespo/gitshelf/internal/shelf"
 	"github.com/ignaciotcrespo/gitshelf/internal/types"
 	"github.com/ignaciotcrespo/gitshelf/internal/ui/panel"
-	"github.com/ignaciotcrespo/gitshelf/pkg/tui"
+	"github.com/ignaciotcrespo/tui-framework"
 )
 
 // panelContent holds rendered content and scroll metadata for a panel.
