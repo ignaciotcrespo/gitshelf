@@ -10,6 +10,12 @@ A terminal UI for organizing git changes into changelists and shelves — like I
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)
 
+[![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-pink?logo=github-sponsors)](https://github.com/sponsors/ignaciotcrespo)
+
+**Other projects:**
+- [Color Manipulation](https://github.com/ignaciotcrespo/color-manipulation-plugin) — Color toolkit for JetBrains IDEs with 30+ format conversions
+- [Vector Drawable Thumbnails](https://github.com/ignaciotcrespo/vector-drawable-thumbnails-plugin) — Thumbnail previews of Android Vector Drawables in JetBrains IDEs
+
 ## The problem
 
 You're working on a feature. You notice a typo. You fix it. Now your `git diff` mixes the typo fix with the feature work, and you have to mentally separate them at commit time — or worse, you commit them together.
